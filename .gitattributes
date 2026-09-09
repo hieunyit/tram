@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# The parser corpus is the point of the corpus: CRLF files, a file with no
+# final newline, ragged indentation. Git must not normalise any of it, or the
+# round-trip test would only ever prove that the fixtures had been rewritten.
+# This rule comes last because the last matching pattern wins.
+internal/sshconf/testdata/** -text
