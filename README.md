@@ -34,6 +34,7 @@ tram ping -g prod          OK / AUTH / REFUSED / TIMEOUT / DNS / HOST_KEY
 tram doctor web1           walk the route, stop at the first broken station
 tram doctor --config       check ssh_config itself
 tram exec -g prod -- df -h run a command across a group
+tram import inventory.ini  read an Ansible inventory or a CSV export
 ```
 
 Every command that reads something takes `-f json`, `-f yaml`, `-f csv` or
@@ -87,6 +88,35 @@ behalf would turn a warning about interception into a silent accept.
 **6. The numbers match the tools you would check them against.** Not yet built;
 see the roadmap.
 
+## Importing
+
+`tram import` reads an inventory written for another tool. Three formats, and
+the format is detected from the file unless `--from` says otherwise: the classic
+Ansible INI inventory, the Ansible YAML inventory, and a CSV export with a
+header row.
+
+Only the Ansible variables that say how to reach a machine are read:
+`ansible_host`, `ansible_user`, `ansible_port`, `ansible_ssh_private_key_file`,
+and a jump host given as `-J` or `-o ProxyJump=` inside
+`ansible_ssh_common_args`. Everything else in an inventory is about what Ansible
+does once it has connected, which is none of tram's business. A `ProxyCommand`
+is deliberately not translated into a `ProxyJump`: a command is not a host, and
+guessing at one produces a stanza that looks right and connects somewhere else.
+
+Group nesting comes across. A host in `webservers`, where `webservers` is a
+child of `prod`, lands in `prod/webservers`. A host in several groups keeps the
+most specific one, and the rest are reported rather than dropped in silence.
+Host ranges such as `web[01:04]` are expanded, zero padding and all.
+
+A host Ansible reaches some other way, say `ansible_connection=local`, is
+skipped and named. ssh cannot be pointed at it, so importing it would only
+create a stanza that fails.
+
+Nothing is written until you say so. `--dry-run` shows the plan, an existing
+host is left alone unless you pass `--overwrite`, and re-importing the same file
+reports that everything already matches. In the interface, `I` does the same
+thing: type a path, read the preview, press `w` to write it.
+
 ## Where things live
 
 ```
@@ -120,10 +150,11 @@ Two screens.
 marks hosts, `/` searches (a query starting with `#` matches groups),
 `a`/`e`/`c`/`d` add, edit, clone and delete, `E` edits everything marked, `A`
 links to an account, `p`/`D`/`x`/`r` run ping, doctor, a command and a snippet,
-`*` pins, `tab` shows detail, `?` lists the keys.
+`I` imports an inventory, `*` pins, `tab` shows detail, `?` lists the keys.
 
 **Results.** One collapsible block per host, `space` expands, `enter` connects
-to whichever host is selected.
+to whichever host is selected. An import preview uses the same screen, where
+`w` writes the hosts and `esc` throws the plan away.
 
 The interface draws tram's own data and nothing else. It never renders the
 contents of a session. `enter` exits the interface, gives the terminal to ssh,
@@ -140,7 +171,8 @@ Three layers, the first of which is the one that matters:
 2. **Golden files** for the writer: add a host, delete one with odd comments in
    it, rename one with a cascade.
 3. **Unit tests** for the failure classifier, using the wordings OpenSSH
-   actually produces.
+   actually produces, and for the importer, against inventories in the shapes
+   people really write them.
 
 ```bash
 go test ./...
@@ -156,10 +188,10 @@ therefore writes a relative path, and so should you.
 
 Built: the parser and writer, the handoff, `ls`, the editing commands, `init`,
 accounts, secrets and askpass, key handling, the full ProxyJump treatment,
-`ping`, `doctor`, `exec`, `key push`, and the two screens.
+`ping`, `doctor`, `exec`, `key push`, `import`, and the two screens.
 
-Not yet built: `tram import` for CSV and Ansible inventories, `tram top` and its
-dashboard, `tram tmux`, and the ASCII fallback beyond the `--ascii` flag.
+Not yet built: `tram top` and its dashboard, `tram tmux`, and the ASCII fallback
+beyond the `--ascii` flag.
 
 Deliberately not planned: anything that redraws the inside of an ssh session,
 tabs, split panes, prefix keys, session recording, a hand-drawn SFTP browser, or

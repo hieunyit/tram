@@ -93,6 +93,11 @@ type Model struct {
 	status  string
 	problem string
 
+	// pendingImport holds a plan that has been previewed but not written. It
+	// takes a second, explicit key to apply, because an import can create
+	// dozens of hosts at once.
+	pendingImport *inventory.ImportPlan
+
 	outcome Outcome
 	quit    bool
 }

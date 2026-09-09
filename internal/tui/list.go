@@ -117,6 +117,9 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return m.openSnippetPicker()
 
+	case "I":
+		m.openImportForm()
+
 	case "R":
 		m.inv2reload()
 		return m, note("reloaded from disk")
@@ -326,7 +329,7 @@ func (m *Model) listHelp() string {
 	if m.mode == modeSearch {
 		return "enter apply  esc cancel   #group filters by group"
 	}
-	return "enter connect  W window  f sftp  space mark  / search  a add  e edit  c clone  d delete  E batch  A account  p ping  D doctor  x exec  r snippet  * pin  tab detail  ? help  q quit"
+	return "enter connect  W window  f sftp  space mark  / search  a add  e edit  c clone  d delete  E batch  A account  p ping  D doctor  x exec  r snippet  I import  * pin  tab detail  ? help  q quit"
 }
 
 func (m *Model) viewHelp() string {
@@ -341,6 +344,7 @@ func (m *Model) viewHelp() string {
 		{"E", "edit every marked host at once"},
 		{"A", "link the selection to an account"},
 		{"p D x r", "ping, doctor, run a command, run a snippet"},
+		{"I", "import an Ansible inventory or a CSV export"},
 		{"*", "pin a host to the top of nothing in particular, but mark it"},
 		{"tab", "show the detail pane"},
 		{"R", "re-read ssh_config from disk"},

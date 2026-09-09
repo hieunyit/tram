@@ -65,6 +65,24 @@ type Change struct {
 	Summary  []string
 }
 
+// warn records a warning, dropping one that has already been said. Importing
+// fifty hosts that all jump through the same unknown station is one problem,
+// not fifty.
+func (c *Change) warn(msgs ...string) {
+	for _, m := range msgs {
+		dup := false
+		for _, e := range c.Warnings {
+			if e == m {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			c.Warnings = append(c.Warnings, m)
+		}
+	}
+}
+
 func (c *Change) touch(f *sshconf.File) {
 	for _, e := range c.Files {
 		if e == f {
@@ -472,7 +490,10 @@ func (inv *Inventory) jumpWarnings(host, jump string) []string {
 	var out []string
 	for _, spec := range model.SplitJump(jump) {
 		hop := model.ParseJumpSpec(spec)
-		if _, ok := inv.Host(hop.Host); !ok {
+		// A station given as an address or a domain name is a perfectly ordinary
+		// thing to write, so only a bare name that resolves to no stanza and
+		// looks like nothing else is worth mentioning.
+		if _, ok := inv.Host(hop.Host); !ok && !looksLikeAddress(hop.Host) {
 			out = append(out, fmt.Sprintf("ProxyJump names %q, which is not a configured host", hop.Host))
 		}
 		if model.WouldCycle(host, hop.Host, inv.Lookup) {
@@ -481,6 +502,12 @@ func (inv *Inventory) jumpWarnings(host, jump string) []string {
 		}
 	}
 	return out
+}
+
+// looksLikeAddress reports whether a jump station names a machine directly
+// rather than a stanza, which a dotted name or an address does.
+func looksLikeAddress(s string) bool {
+	return strings.Contains(s, ".") || strings.Contains(s, ":")
 }
 
 // validName rejects host names that ssh would read as something else.

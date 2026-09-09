@@ -18,6 +18,7 @@ const (
 	formClone
 	formBatch
 	formExec
+	formImport
 )
 
 // fieldID names a form field so the code reads as something other than indexes.
@@ -34,6 +35,7 @@ const (
 	fDesc    fieldID = "desc"
 	fAccount fieldID = "account"
 	fCommand fieldID = "command"
+	fPath    fieldID = "path"
 )
 
 type field struct {
@@ -268,6 +270,9 @@ func (f *form) view(width, height int) string {
 func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	f := m.form
 	switch f.kind {
+	case formImport:
+		return m.submitImport()
+
 	case formExec:
 		cmdText := f.get(fCommand)
 		if cmdText == "" {

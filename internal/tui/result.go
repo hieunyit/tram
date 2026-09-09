@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/model"
 )
 
@@ -49,6 +50,7 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc":
 		m.screen = screenList
 		m.result = nil
+		m.pendingImport = nil
 		return m, nil
 	case "ctrl+c":
 		return m.quitWith(ActionQuit, "")
@@ -69,7 +71,17 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		for i := range r.rows {
 			r.expanded[i] = !all
 		}
+	case "w":
+		if m.pendingImport != nil {
+			return m, m.applyImport()
+		}
 	case "enter":
+		// An import preview has nothing to connect to yet: the hosts on screen
+		// do not exist. So enter writes them instead of opening a session to a
+		// name that is not in any configuration file.
+		if m.pendingImport != nil {
+			return m, m.applyImport()
+		}
 		if r.cursor >= 0 && r.cursor < len(r.rows) {
 			return m.quitWith(ActionConnect, r.rows[r.cursor].Host)
 		}
@@ -88,7 +100,11 @@ func (m *Model) viewResult() string {
 		}
 	}
 	b.WriteString(m.st.title.Render(r.title))
-	b.WriteString(m.st.muted.Render(fmt.Sprintf("   %d of %d ok", ok, len(r.rows))) + "\n\n")
+	if p := m.pendingImport; p != nil {
+		b.WriteString(m.st.muted.Render("   "+strings.Join(importTally(p), ", ")) + "\n\n")
+	} else {
+		b.WriteString(m.st.muted.Render(fmt.Sprintf("   %d of %d ok", ok, len(r.rows))) + "\n\n")
+	}
 
 	// Render every line, then window onto the cursor, so an expanded block
 	// scrolls the way a reader expects rather than jumping.
@@ -144,8 +160,34 @@ func (m *Model) viewResult() string {
 	}
 
 	b.WriteString(m.statusLine() + "\n")
-	b.WriteString(m.st.help.Render("space expand  o expand all  enter connect to this host  esc back"))
+	help := "space expand  o expand all  enter connect to this host  esc back"
+	if p := m.pendingImport; p != nil {
+		help = fmt.Sprintf("space expand  o expand all  enter or w write %d host(s)  esc cancel", p.Writes())
+	}
+	b.WriteString(m.st.help.Render(help))
 	return b.String()
+}
+
+// importTally summarises a pending import, naming only the outcomes that
+// happened so the header does not read as a row of zeroes.
+func importTally(p *inventory.ImportPlan) []string {
+	c := p.Counts()
+	var parts []string
+	add := func(n int, what string) {
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, what))
+		}
+	}
+	add(c[inventory.ImportAdd], "to add")
+	add(c[inventory.ImportUpdate], "to update")
+	add(c[inventory.ImportUnchanged], "already match")
+	add(c[inventory.ImportSkip], "left alone")
+	add(c[inventory.ImportReject], "rejected")
+	add(len(p.Skipped), "not reachable over ssh")
+	if len(parts) == 0 {
+		return []string{"nothing to do"}
+	}
+	return parts
 }
 
 // runOn performs an action across the current selection and switches to the
