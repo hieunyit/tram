@@ -18,19 +18,47 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.quitWith(ActionQuit, "")
 
 	case "up", "k", "ctrl+p":
-		m.moveCursor(-1)
+		m.move(-1)
 	case "down", "j", "ctrl+n":
-		m.moveCursor(1)
+		m.move(1)
+
+	case "left", "h":
+		if m.sidebarWidth() > 0 {
+			m.focus = focusGroups
+		}
+	case "right", "l":
+		m.focus = focusHosts
+	case "tab":
+		if m.sidebarWidth() > 0 {
+			if m.focus == focusGroups {
+				m.focus = focusHosts
+			} else {
+				m.focus = focusGroups
+			}
+		}
+	case "g":
+		m.hideGroups = !m.hideGroups
+		if m.hideGroups {
+			m.focus = focusHosts
+		}
 	case "pgup":
 		m.moveCursor(-m.listHeight())
 	case "pgdown":
 		m.moveCursor(m.listHeight())
-	case "home", "g":
+	case "home":
 		m.cursor = 0
 	case "end", "G":
 		m.cursor = max(0, len(m.filtered)-1)
 
 	case "enter":
+		// In the group pane enter opens the branch; there is nothing to
+		// connect to there.
+		if m.focus == focusGroups {
+			m.toggleGroup()
+			m.cursor, m.offset = 0, 0
+			m.applyFilter()
+			return m, nil
+		}
 		if h, ok := m.current(); ok {
 			return m.quitWith(ActionConnect, h.Name)
 		}
@@ -70,7 +98,7 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveCursor(1)
 		}
 
-	case "tab", "i":
+	case "i":
 		m.detail = !m.detail
 
 	case "*":
@@ -79,6 +107,9 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				return m, fail(err)
 			}
+			// The file did not change, so only the inventory's own view of it
+			// has to be rebuilt for the star to appear.
+			m.inv.Refresh()
 			state := "unpinned"
 			if on {
 				state = "pinned"
@@ -135,6 +166,17 @@ func (m *Model) inv2reload() {
 		m.inv = fresh
 	}
 	m.reload()
+}
+
+// move sends the keystroke to whichever pane has the keyboard.
+func (m *Model) move(d int) {
+	if m.focus == focusGroups {
+		m.groupCursor = clamp(m.groupCursor+d, 0, max(0, len(m.groupRows)-1))
+		m.cursor, m.offset = 0, 0
+		m.applyFilter()
+		return
+	}
+	m.moveCursor(d)
 }
 
 func (m *Model) moveCursor(d int) {
@@ -198,19 +240,29 @@ func (m *Model) viewList() string {
 	}
 
 	h := m.listHeight()
+	side := m.renderSidebar(h)
+
+	var rows []string
 	if len(m.filtered) == 0 {
-		b.WriteString(m.st.muted.Render("  no hosts match") + "\n")
-		for i := 1; i < h; i++ {
-			b.WriteString("\n")
-		}
+		rows = append(rows, m.st.muted.Render("  nothing here"))
 	} else {
 		end := min(m.offset+h, len(m.filtered))
 		for i := m.offset; i < end; i++ {
-			b.WriteString(m.renderRow(m.filtered[i], i == m.cursor) + "\n")
+			rows = append(rows, m.renderRow(m.filtered[i], i == m.cursor))
 		}
-		for i := end - m.offset; i < h; i++ {
-			b.WriteString("\n")
+	}
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+
+	// The two panes are written a line at a time so they stay level, whatever
+	// either of them contains.
+	for i := 0; i < h; i++ {
+		if len(side) == h {
+			b.WriteString(side[i] + m.st.muted.Render(m.gl.vbar) + rows[i] + "\n")
+			continue
 		}
+		b.WriteString(rows[i] + "\n")
 	}
 
 	if m.detail {
@@ -223,7 +275,10 @@ func (m *Model) viewList() string {
 
 // columns adapts to the window: the wide fields disappear before the name does.
 func (m *Model) columns() (name, target, group, jump int) {
-	w := m.width - 6
+	w := m.width - 6 - m.sidebarWidth() - 2
+	if w < 30 {
+		w = 30
+	}
 	name = clamp(w*30/100, 10, 28)
 	target = clamp(w*32/100, 12, 34)
 	group = clamp(w*18/100, 0, 18)
@@ -239,6 +294,10 @@ func (m *Model) header() string {
 	cols := "  " + pad("NAME", nw) + " " + pad("TARGET", tw) + " " + pad("GROUP", gw)
 	if jw > 4 {
 		cols += " " + pad("JUMP", jw)
+	}
+	// The headings sit over the host list, not over the group pane.
+	if w := m.sidebarWidth(); w > 0 {
+		return m.st.header.Render(pad("GROUPS", w+2)) + m.st.header.Render(cols)
 	}
 	return m.st.header.Render(cols)
 }
@@ -329,7 +388,10 @@ func (m *Model) listHelp() string {
 	if m.mode == modeSearch {
 		return "enter apply  esc cancel   #group filters by group"
 	}
-	return "enter connect  W window  f sftp  space mark  / search  a add  e edit  c clone  d delete  E batch  A account  p ping  D doctor  x exec  r snippet  I import  * pin  tab detail  ? help  q quit"
+	if m.focus == focusGroups {
+		return "enter open  right hosts  tab switch  g hide groups  / search  ? help  q quit"
+	}
+	return "enter connect  W window  f sftp  space mark  tab groups  / search  a add  e edit  c clone  d delete  E batch  A account  p ping  D doctor  x exec  r snippet  I import  * pin  i detail  ? help  q quit"
 }
 
 func (m *Model) viewHelp() string {
@@ -346,7 +408,10 @@ func (m *Model) viewHelp() string {
 		{"p D x r", "ping, doctor, run a command, run a snippet"},
 		{"I", "import an Ansible inventory or a CSV export"},
 		{"*", "pin a host to the top of nothing in particular, but mark it"},
-		{"tab", "show the detail pane"},
+		{"tab / left / right", "move between the group pane and the host list"},
+		{"enter (groups)", "open or close a branch of the group tree"},
+		{"g", "hide the group pane, for a narrow window"},
+		{"i", "show the detail pane"},
 		{"R", "re-read ssh_config from disk"},
 		{"q", "quit"},
 	}

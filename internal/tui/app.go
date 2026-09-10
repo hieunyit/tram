@@ -34,6 +34,14 @@ type Outcome struct {
 	Host   string
 }
 
+// pane is which half of the list screen the keyboard is driving.
+type pane int
+
+const (
+	focusHosts pane = iota
+	focusGroups
+)
+
 // screen is which of the two views is showing.
 type screen int
 
@@ -80,6 +88,14 @@ type Model struct {
 	marked   map[string]bool
 	detail   bool
 
+	// The group pane on the left, and which of the two panes the keyboard is
+	// talking to.
+	groupRows   []groupRow
+	groupCursor int
+	openGroups  map[string]bool
+	focus       pane
+	hideGroups  bool
+
 	search      textinput.Model
 	searchQuery string
 
@@ -119,14 +135,15 @@ func New(inv *inventory.Inventory, r Runner, ascii bool) *Model {
 	ti.CharLimit = 120
 
 	m := &Model{
-		inv:    inv,
-		Runner: r,
-		st:     newStyles(),
-		gl:     newGlyphs(ascii),
-		marked: map[string]bool{},
-		search: ti,
-		width:  80,
-		height: 24,
+		inv:        inv,
+		Runner:     r,
+		st:         newStyles(),
+		gl:         newGlyphs(ascii),
+		marked:     map[string]bool{},
+		search:     ti,
+		width:      80,
+		height:     24,
+		openGroups: map[string]bool{},
 	}
 	m.reload()
 	return m
@@ -137,6 +154,7 @@ func (m *Model) Outcome() Outcome { return m.outcome }
 
 func (m *Model) reload() {
 	m.hosts = m.inv.Hosts()
+	m.rebuildGroups()
 	m.applyFilter()
 }
 
@@ -144,7 +162,7 @@ func (m *Model) applyFilter() {
 	q := strings.TrimSpace(m.searchQuery)
 	m.filtered = nil
 	for _, h := range m.hosts {
-		if h.Matches(q) {
+		if m.inSelectedGroup(h) && h.Matches(q) {
 			m.filtered = append(m.filtered, h)
 		}
 	}

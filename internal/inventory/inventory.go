@@ -364,3 +364,10 @@ func (inv *Inventory) Groups() []string {
 func (inv *Inventory) Block(name string) *sshconf.Block {
 	return inv.byName[strings.ToLower(name)]
 }
+
+// Refresh recomputes the host list from the parse tree and tram's own state.
+//
+// It is needed after a change that touches only the state, such as pinning a
+// host: the configuration file is untouched, so nothing else would rebuild the
+// decorated list, and the star would not appear until the next run.
+func (inv *Inventory) Refresh() { inv.rebuild() }

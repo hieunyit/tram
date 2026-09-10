@@ -87,10 +87,15 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 	if res.ExitCode == 0 {
 		return nil
 	}
+	if res.Interrupted {
+		// The user stopped it. There is nothing to report and nothing to
+		// pause over; a script still gets a non-zero status.
+		return ExitCode{Code: res.ExitCode}
+	}
 	if res.SSHFailed {
 		return ExitCode{Code: res.ExitCode, Err: fmt.Errorf("ssh could not open the session to %s", h.Name)}
 	}
-	return ExitCode{Code: res.ExitCode}
+	return ExitCode{Code: res.ExitCode, Err: fmt.Errorf("%s: the remote command exited with status %d", h.Name, res.ExitCode)}
 }
 
 // announce says what is being dialled, on one line, before ssh takes the

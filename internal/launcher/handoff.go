@@ -19,6 +19,10 @@ type Result struct {
 	ExitCode int
 	// SSHFailed is true when the failure was ssh's rather than the command's.
 	SSHFailed bool
+	// Interrupted is true when the session was cut short by a signal rather
+	// than by anything exiting: ctrl+c while ssh is still trying to connect,
+	// most often. It is not a failure and there is nothing to report about it.
+	Interrupted bool
 	// Err is set when the ssh binary could not be started at all.
 	Err error
 }
@@ -69,6 +73,13 @@ func Handoff(argv []string, env []string) Result {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		code := ee.ExitCode()
+		// A process killed by a signal has no exit code, and the standard
+		// library reports -1. Calling that "the remote command exited with
+		// status -1" is wrong twice over: nothing exited, and the reason was a
+		// key the user pressed.
+		if code < 0 {
+			return Result{ExitCode: 130, Interrupted: true}
+		}
 		return Result{ExitCode: code, SSHFailed: code == SSHError}
 	}
 	return Result{ExitCode: SSHError, SSHFailed: true, Err: err}

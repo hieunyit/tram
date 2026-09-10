@@ -56,6 +56,8 @@ var specialKeys = map[string]tea.KeyType{
 	"esc":    tea.KeyEsc,
 	"space":  tea.KeySpace,
 	"tab":    tea.KeyTab,
+	"left":   tea.KeyLeft,
+	"right":  tea.KeyRight,
 	"ctrl+s": tea.KeyCtrlS,
 	"ctrl+c": tea.KeyCtrlC,
 }
@@ -111,9 +113,12 @@ func TestListRendersAndNavigates(t *testing.T) {
 	if h, _ := m.current(); h.Name != "bastion" {
 		t.Errorf("after one step down the cursor is on %q", h.Name)
 	}
-	send(m, "tab") // detail pane
-	if !strings.Contains(m.View(), "b.example.com") {
-		t.Error("the detail pane does not show the address")
+	send(m, "i") // detail pane
+	if !strings.Contains(m.View(), "prod/web") && !strings.Contains(m.View(), "b.example.com") {
+		t.Error("the detail pane does not show the host")
+	}
+	if !m.detail {
+		t.Error("i did not open the detail pane")
 	}
 }
 

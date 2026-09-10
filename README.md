@@ -199,11 +199,18 @@ needs `--force`.
 
 Two screens.
 
-**List.** `enter` connects, `W` opens a new window, `f` opens sftp, `space`
-marks hosts, `/` searches (a query starting with `#` matches groups),
-`a`/`e`/`c`/`d` add, edit, clone and delete, `E` edits everything marked, `A`
-links to an account, `p`/`D`/`x`/`r` run ping, doctor, a command and a snippet,
-`I` imports an inventory, `*` pins, `tab` shows detail, `?` lists the keys.
+**List.** Two panes. On the left a group tree: All, then Favorites and Recent
+once there is anything in them, then the hierarchy with a count beside each
+level, and the hosts with no group at the bottom. On the right the hosts in
+whichever row is selected. `tab`, `left` and `right` move between the panes,
+`enter` opens a branch, and `g` hides the tree when the window is narrow. Below
+70 columns it hides itself.
+
+`enter` connects, `W` opens a new window, `f` opens sftp, `space` marks hosts,
+`/` searches within the selected group, `a`/`e`/`c`/`d` add, edit, clone and
+delete, `E` edits everything marked, `A` links to an account or makes one,
+`p`/`D`/`x`/`r` run ping, doctor, a command and a snippet, `I` imports an
+inventory, `*` pins, `i` shows detail, `?` lists the keys.
 
 The account, group and jump fields open a list rather than asking you to
 remember what exists, and the account list can make one: filling in a host and
