@@ -39,6 +39,7 @@ func runTUI(a *App) error {
 		}
 
 		out := m.Outcome()
+		a.Note = ""
 		switch out.Action {
 		case tui.ActionQuit:
 			return nil
@@ -54,6 +55,11 @@ func runTUI(a *App) error {
 			if err := reportSession(runSFTP(a, out.Host)); err != nil {
 				return err
 			}
+		}
+		// Anything the session had to say is on the terminal now, and the
+		// interface is about to paint over it.
+		if a.Note != "" {
+			pause()
 		}
 		a.Reload()
 	}

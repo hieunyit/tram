@@ -33,6 +33,12 @@ type App struct {
 	Force  bool
 	ASCII  bool
 
+	// Note carries something worth saying that happened during a session, such
+	// as a password tram has just remembered. The interface reads it after the
+	// session ends, because otherwise the line would be painted over before
+	// anyone could read it.
+	Note string
+
 	inv *inventory.Inventory
 }
 

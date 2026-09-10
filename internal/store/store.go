@@ -68,11 +68,15 @@ type Options struct {
 	ASCII bool `toml:"ascii"`
 	// ConfirmMulti asks before running a command on more than one host.
 	ConfirmMulti bool `toml:"confirm_multi"`
+	// RememberSecrets lets tram offer to keep a password or passphrase the
+	// first time a host asks for one, so it is typed once rather than every
+	// time. Set it to false to leave every prompt to ssh.
+	RememberSecrets bool `toml:"remember_secrets"`
 }
 
 // DefaultOptions are the settings a fresh install runs with.
 func DefaultOptions() Options {
-	return Options{Parallel: 5, Timeout: 10, ConfirmMulti: true}
+	return Options{Parallel: 5, Timeout: 10, ConfirmMulti: true, RememberSecrets: true}
 }
 
 // Load reads every state file. A missing or unreadable file is not an error:

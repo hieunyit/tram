@@ -53,6 +53,10 @@ type AskpassSetup struct {
 	// Force sets SSH_ASKPASS_REQUIRE=force so that ssh uses the helper even
 	// when it has a real terminal and would otherwise prompt directly.
 	Force bool
+	// Learn, when set, lets the helper ask the user for a secret it does not
+	// have and park the answer under this nonce. It is an identifier, not a
+	// secret, and means nothing to anyone who reads it.
+	Learn string
 }
 
 // Argv builds the ssh command line for a request.
@@ -85,6 +89,9 @@ func (r Request) Env() []string {
 	}
 	env = setEnv(env, "SSH_ASKPASS", r.Askpass.Binary)
 	env = setEnv(env, "TRAM_ASKPASS_TOKEN", r.Askpass.Token)
+	if r.Askpass.Learn != "" {
+		env = setEnv(env, "TRAM_ASKPASS_LEARN", r.Askpass.Learn)
+	}
 	if r.Askpass.Force {
 		// Without this ssh prefers to prompt on the terminal it already has,
 		// and the helper is never called. It needs OpenSSH 8.4 or newer.

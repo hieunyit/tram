@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/launcher"
@@ -70,10 +71,21 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 
 	req := buildRequest(a, h.Name, remote, opt)
 	req.ForceTTY = req.ForceTTY && isTerminal(os.Stdin)
-	req.Askpass = askpassFor(a, inv, h)
+
+	st := secret.New(store.Dir())
+	req.Askpass = askpassFor(a, inv, st, h)
 
 	_ = inv.Store.Touch(h.Name)
 	res := launcher.Handoff(req.Argv(), req.Env())
+
+	// A secret typed during the session is only worth keeping if it opened the
+	// session. Committing on the way in would remember a typo forever. A remote
+	// command that exits non-zero still authenticated, so that counts as worked.
+	if note := settleLearned(st, req.Askpass, !res.SSHFailed); note != "" {
+		fmt.Fprintln(os.Stderr, note)
+		a.Note = note
+	}
+
 	if res.Err != nil {
 		return fmt.Errorf("could not start ssh: %w", res.Err)
 	}
@@ -86,38 +98,92 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 	return ExitCode{Code: res.ExitCode}
 }
 
-// askpassFor arms tram's askpass helper when a password is stored for this
-// host's identity.
+// askpassFor decides whether ssh should ask tram for the secrets it needs.
 //
-// The password itself does not travel here. Only a subject name goes into the
-// child's environment, and ssh calls tram back on a separate invocation to
-// fetch the value from the operating system's keyring.
-func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.AskpassSetup {
-	st := secret.New(store.Dir())
+// The secret itself does not travel here. Only a subject name and a nonce go
+// into the child's environment, and ssh calls tram back on a separate
+// invocation to fetch or capture the value.
+//
+// Two cases arm the helper. One is a secret tram already holds, which is the
+// point of storing it. The other is the first connection to a host that has
+// none: the helper asks once, on the console, and the answer is remembered if
+// the session works. That is what turns "type it every time" into "type it
+// once", and it is why the helper is armed even when the keyring is empty.
+func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host) launcher.AskpassSetup {
+	force, version := secret.SupportsAskpassRequire()
 
+	// A password set on the host wins over one set on its account, because the
+	// more specific answer is the one that was meant.
 	sub := secret.PasswordFor("host", h.Name)
-	if _, err := st.Get(sub); err != nil {
-		if h.Account == "" {
-			return launcher.AskpassSetup{}
-		}
-		sub = secret.PasswordFor("account", h.Account)
-		if _, err := st.Get(sub); err != nil {
-			return launcher.AskpassSetup{}
+	_, stored := st.Get(sub)
+	if stored != nil && h.Account != "" {
+		acct := secret.PasswordFor("account", h.Account)
+		if _, err := st.Get(acct); err == nil {
+			sub, stored = acct, nil
 		}
 	}
 
-	force, version := secret.SupportsAskpassRequire()
-	if !force {
-		fmt.Fprintf(os.Stderr,
-			"warning: a password is stored for %s but %s does not support SSH_ASKPASS_REQUIRE, so ssh will prompt instead\n",
-			h.Name, version)
+	if stored == nil {
+		if !force {
+			fmt.Fprintf(os.Stderr,
+				"warning: a password is stored for %s but %s has no SSH_ASKPASS_REQUIRE, so ssh will prompt instead\n",
+				h.Name, version)
+		}
+		return launcher.AskpassSetup{
+			Enabled: true,
+			Binary:  launcher.SelfPath(),
+			Token:   string(sub),
+			Force:   force,
+		}
+	}
+
+	// Nothing stored. Offer to learn one, but only when every part of the
+	// mechanism is actually there. Arming it otherwise would be worse than
+	// doing nothing: with SSH_ASKPASS_REQUIRE=force ssh does not fall back to
+	// asking on its own, so a helper with nowhere to prompt would fail the
+	// login with nothing on screen to explain why.
+	switch {
+	case !inv.Store.Options.RememberSecrets:
+		return launcher.AskpassSetup{}
+	case !force:
+		return launcher.AskpassSetup{}
+	case !secret.TTYAvailable():
+		return launcher.AskpassSetup{}
 	}
 	return launcher.AskpassSetup{
 		Enabled: true,
 		Binary:  launcher.SelfPath(),
 		Token:   string(sub),
-		Force:   force,
+		Force:   true,
+		Learn:   secret.NewNonce(),
 	}
+}
+
+// settleLearned commits or discards whatever the helper captured, and returns
+// the line to tell the user about it, or "" when there is nothing to say.
+func settleLearned(st *secret.Store, setup launcher.AskpassSetup, worked bool) string {
+	if setup.Learn == "" {
+		return ""
+	}
+	l, ok := st.TakePending(setup.Learn)
+	if !ok {
+		return "" // ssh never had to ask
+	}
+	if !worked {
+		return "the session failed, so tram did not remember what you typed"
+	}
+	if err := st.Commit(l); err != nil {
+		return "tram could not save the secret: " + err.Error()
+	}
+	return fmt.Sprintf("tram remembered the %s for %s and will not ask again. Undo with `tram secret rm %s`.",
+		l.Subject.Kind(), l.Subject.Label(), lastField(l.Subject.Label()))
+}
+
+func lastField(s string) string {
+	if i := strings.LastIndex(s, " "); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }

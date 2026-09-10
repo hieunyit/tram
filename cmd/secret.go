@@ -40,6 +40,10 @@ func newSecretCmd() *cobra.Command {
 		Short: "Store passwords in the operating system's keyring",
 		Long: `Keep a password where the operating system keeps such things.
 
+You usually do not need these commands. The first time a host asks for a
+password, tram asks once and remembers it if the session works. These are for
+setting one ahead of time, seeing what is stored, and forgetting it again.
+
 The value never reaches ssh_config, never appears on a command line and never
 sits in an environment variable. ssh receives it by calling tram back as its
 askpass helper, over a pipe, at the moment it is needed.

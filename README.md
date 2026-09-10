@@ -85,6 +85,30 @@ before it is stored. The helper answers exactly two questions and refuses host
 key confirmations permanently: answering "yes" to an unknown fingerprint on your
 behalf would turn a warning about interception into a silent accept.
 
+## Typing a password once
+
+The first time a host asks for a password, tram asks for it on the console,
+hands it to ssh, and keeps it if the session opens. After that it answers the
+prompt itself and you are not asked again.
+
+Two details make this safe to leave switched on. The answer is parked under a
+one-off identifier while the session runs and only written to the keyring once
+the connection has actually succeeded, so a typo is never remembered. And the
+host named in ssh's own prompt decides which secret is served, so a jump
+station gets its own password rather than the destination's.
+
+`tram secret ls` shows what is stored and where, never the values.
+`tram secret rm <host>` forgets one. Setting `remember_secrets = false` in
+`config.toml` turns the whole thing off and leaves every prompt to ssh.
+
+It only engages when it can work: OpenSSH 8.4 or newer, and a console to ask
+on. Below 8.4 there is no `SSH_ASKPASS_REQUIRE`, ssh prompts on its terminal
+and ignores any helper, and tram says so rather than pretending.
+
+The same mechanism remembers a key's passphrase. If you own the far end, a key
+installed with `tram key push` is still the better answer than a remembered
+password.
+
 **6. The numbers match the tools you would check them against.** Not yet built;
 see the roadmap.
 
@@ -173,6 +197,11 @@ Three layers, the first of which is the one that matters:
 3. **Unit tests** for the failure classifier, using the wordings OpenSSH
    actually produces, and for the importer, against inventories in the shapes
    people really write them.
+
+The askpass mechanism has a test of its own, because the whole feature rests on
+a claim about ssh that a version number does not prove. It generates a real
+encrypted key, starts a real agent, and checks that `ssh-add` with no standard
+input at all calls the helper and uses what it says.
 
 ```bash
 go test ./...

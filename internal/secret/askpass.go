@@ -1,6 +1,8 @@
 package secret
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -10,62 +12,185 @@ import (
 	"strings"
 )
 
-// EnvToken names the subject the askpass helper should answer for. It holds a
-// subject name, not a secret, so it is safe in the child's environment.
-const EnvToken = "TRAM_ASKPASS_TOKEN"
+// Environment variables ssh's askpass helper is started with. They carry names
+// and a nonce, never a secret: the value itself only ever moves between the
+// keyring and ssh's own pipe.
+const (
+	// EnvToken names the subject the helper should answer for.
+	EnvToken = "TRAM_ASKPASS_TOKEN"
+	// EnvLearn switches the helper into learn mode and carries the nonce the
+	// captured secret is parked under until the session proves it was right.
+	EnvLearn = "TRAM_ASKPASS_LEARN"
+)
 
 // IsAskpassInvocation reports whether this process was started by ssh asking a
 // question rather than by a user running a command.
-func IsAskpassInvocation() bool { return os.Getenv(EnvToken) != "" }
+func IsAskpassInvocation() bool {
+	return os.Getenv(EnvToken) != "" || os.Getenv(EnvLearn) != ""
+}
 
 var (
 	// ssh asks about a host key in several wordings across versions, but every
 	// one of them offers a yes/no choice about trusting a fingerprint.
 	hostKeyPrompt = regexp.MustCompile(`(?i)authenticity of host|continue connecting|fingerprint|host key.*(changed|verification)`)
 	// A passphrase prompt names the key file, which is what tells tram which
-	// stored passphrase to hand back.
-	passphrasePrompt = regexp.MustCompile(`(?i)enter passphrase for( key)?\s*'?([^']*)'?`)
+	// stored passphrase to hand back. Two wordings exist, one quoting the path
+	// and one not, and the match is anchored on the prompt's trailing colon so
+	// that a Windows path keeps its drive letter and loses nothing else.
+	passphrasePrompt = regexp.MustCompile(`(?is)enter passphrase for(?: key)?\s+(?:'([^']*)'|(.*?))\s*:\s*$`)
+	// A password prompt names the account it is for, which is how tram tells a
+	// jump station's password from the destination's.
+	passwordPrompt = regexp.MustCompile(`(?i)^(?:([^@\s]+)@)?([^@\s':]+)(?:'s)?\s+password`)
 )
 
 // Askpass answers one question from ssh and writes the answer to out.
 //
-// It answers exactly two kinds of question: a password for the identity named
-// by the token, and a passphrase for a key file named in the prompt. Anything
+// It answers exactly two kinds of question: a password for the identity being
+// asked about, and a passphrase for a key file named in the prompt. Anything
 // else is refused, and a host key confirmation is refused deliberately and
 // permanently. Answering "yes" to an unknown fingerprint on the user's behalf
-// would turn a warning about a possible interception into a silent accept, so
-// tram declines and lets ssh ask the human.
+// would turn a warning about a possible interception into a silent accept.
+//
+// In learn mode, a question tram has no answer for is put to the user on the
+// console and the reply is parked under the session's nonce. It is only written
+// to the keyring for real once the session it was used for has succeeded, so a
+// mistyped password is never remembered.
 func Askpass(st *Store, prompt string, out io.Writer) error {
 	if hostKeyPrompt.MatchString(prompt) {
 		return fmt.Errorf("tram never answers host key questions; answer it yourself")
 	}
+	learn := os.Getenv(EnvLearn)
 
-	if m := passphrasePrompt.FindStringSubmatch(prompt); m != nil {
-		key := strings.TrimSpace(strings.Trim(m[2], `'"`))
+	if m := passphrasePrompt.FindStringSubmatch(strings.TrimSpace(prompt)); m != nil {
+		key := m[1]
+		if key == "" {
+			key = m[2]
+		}
+		key = strings.TrimSpace(strings.Trim(key, `'"`))
 		if key == "" {
 			return fmt.Errorf("passphrase prompt did not name a key file")
 		}
-		v, err := st.Get(PassphraseFor(key))
-		if err != nil {
+		sub := PassphraseFor(key)
+		if v, err := st.Get(sub); err == nil {
+			return write(out, v)
+		}
+		if learn == "" {
 			return fmt.Errorf("no passphrase stored for %s", key)
 		}
-		_, err = io.WriteString(out, v+"\n")
-		return err
+		return capture(st, out, learn, sub, "Passphrase for "+key+": ")
 	}
 
 	if !strings.Contains(strings.ToLower(prompt), "password") {
 		return fmt.Errorf("unrecognised prompt: %s", prompt)
 	}
-	sub := Subject(os.Getenv(EnvToken))
-	if sub == "" {
-		return fmt.Errorf("no subject given")
+
+	for _, sub := range passwordSubjects(prompt) {
+		if v, err := st.Get(sub); err == nil {
+			return write(out, v)
+		}
 	}
-	v, err := st.Get(sub)
+	if learn == "" {
+		return fmt.Errorf("no password stored for %s", strings.TrimSpace(prompt))
+	}
+	subs := passwordSubjects(prompt)
+	return capture(st, out, learn, subs[0], strings.TrimRight(prompt, " ")+" ")
+}
+
+// passwordSubjects lists the subjects that could answer a password prompt, best
+// guess first.
+//
+// The host named in the prompt comes first, because ssh asks for the jump
+// station's password with the station's own name in it. Falling back to the
+// session's token without looking would hand the destination's password to a
+// bastion, which is both wrong and a way to leak one machine's password to
+// another.
+func passwordSubjects(prompt string) []Subject {
+	var out []Subject
+	if m := passwordPrompt.FindStringSubmatch(strings.TrimSpace(prompt)); m != nil && m[2] != "" {
+		out = append(out, PasswordFor("host", m[2]))
+	}
+	if tok := os.Getenv(EnvToken); tok != "" {
+		s := Subject(tok)
+		if len(out) == 0 || out[0] != s {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, PasswordFor("host", "unknown"))
+	}
+	return out
+}
+
+// capture asks the user, parks the answer under the session nonce, and hands it
+// to ssh.
+func capture(st *Store, out io.Writer, nonce string, sub Subject, prompt string) error {
+	v, err := AskOnTTY(prompt)
 	if err != nil {
-		return fmt.Errorf("no password stored for %s", sub.Label())
+		return err
 	}
-	_, err = io.WriteString(out, v+"\n")
+	if err := st.Set(pendingSubject(nonce), v); err != nil {
+		// The session can still go ahead; only the remembering is lost.
+		NoteOnTTY("tram could not park the secret to remember it: %v", err)
+		return write(out, v)
+	}
+	if err := st.Remember(pendingSubject(nonce), "pending "+string(sub)); err != nil {
+		NoteOnTTY("tram could not record what to remember: %v", err)
+	}
+	return write(out, v)
+}
+
+func write(out io.Writer, v string) error {
+	_, err := io.WriteString(out, v+"\n")
 	return err
+}
+
+// ---- the pending secret ---------------------------------------------------
+
+// pendingSubject is where a captured secret waits while the session it was
+// typed for runs.
+func pendingSubject(nonce string) Subject { return Subject("pending:" + nonce) }
+
+// NewNonce returns an identifier for one session's learn attempt.
+func NewNonce() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(int64(os.Getpid()), 16)
+	}
+	return hex.EncodeToString(b)
+}
+
+// Learned describes a secret captured during a session that has not yet been
+// committed.
+type Learned struct {
+	Subject Subject
+	Value   string
+}
+
+// TakePending collects whatever the helper captured during a session and clears
+// it, returning nothing when the helper was never asked.
+func (s *Store) TakePending(nonce string) (Learned, bool) {
+	pend := pendingSubject(nonce)
+	v, err := s.Get(pend)
+	where := s.Where(pend)
+	_ = s.Delete(pend)
+	_ = s.Forget(pend)
+	if err != nil || v == "" {
+		return Learned{}, false
+	}
+	sub := Subject(strings.TrimPrefix(where, "pending "))
+	if sub == "" || !strings.Contains(string(sub), ":") {
+		return Learned{}, false
+	}
+	return Learned{Subject: sub, Value: v}, true
+}
+
+// Commit writes a captured secret where it belongs, now that the session has
+// shown it was the right one.
+func (s *Store) Commit(l Learned) error {
+	if err := s.Set(l.Subject, l.Value); err != nil {
+		return err
+	}
+	return s.Remember(l.Subject, s.Backend())
 }
 
 // ---- ssh capability -------------------------------------------------------
