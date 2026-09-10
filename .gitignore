@@ -1,4 +1,7 @@
 /tram
 /tram.exe
+/tram-linux-*
+/tram-darwin-*
+/tram-windows-*
 /dist/
 *.tram.bak

@@ -13,7 +13,7 @@ import (
 var (
 	// ssh asks about a host key in several wordings across versions, but every
 	// one of them offers a yes/no choice about trusting a fingerprint.
-	hostKeyPrompt = regexp.MustCompile(`(?i)authenticity of host|continue connecting|fingerprint|host key.*(changed|verification)`)
+	hostKeyPrompt = regexp.MustCompile(`(?i)authenticity of host|continue connecting|fingerprint|host identification has changed|host key.*(changed|verification)`)
 	// A passphrase prompt names the key file, which is what tells tram which
 	// key an answer belongs to. Two wordings exist, one quoting the path and
 	// one not, and the match is anchored on the prompt's trailing colon so that
@@ -59,7 +59,7 @@ func LooksLikePrompt(s string) bool {
 // about a possible interception into a silent accept.
 func Askpass(prompt string, out io.Writer) error {
 	if hostKeyPrompt.MatchString(prompt) {
-		return fmt.Errorf("tram never answers host key questions; answer it yourself")
+		return relayHostKeyQuestion(prompt, out)
 	}
 	sess := sessionFromEnv()
 
@@ -87,6 +87,27 @@ func Askpass(prompt string, out io.Writer) error {
 		return err
 	}
 	return write(out, v)
+}
+
+// relayHostKeyQuestion puts ssh's question in front of the person and returns
+// their answer unchanged.
+//
+// tram never decides this one. It also must not refuse it: with the helper
+// forced, ssh does not fall back to asking on its own, so refusing means the
+// first connection to any new host fails with "Host key verification failed"
+// and no way to say yes. Relaying is not answering. The fingerprint is shown
+// exactly as ssh wrote it, and whatever is typed goes straight back.
+func relayHostKeyQuestion(prompt string, out io.Writer) error {
+	text := strings.TrimRight(prompt, " ")
+	if !strings.HasSuffix(text, "\n") {
+		text += " "
+	}
+	answer, err := AskOnTTYVisible(text)
+	if err != nil {
+		return fmt.Errorf("nowhere to put ssh's host key question: %w", err)
+	}
+	// Nothing here is cached. The next new host gets asked about too.
+	return write(out, answer)
 }
 
 // PassphrasePath returns the key file a passphrase prompt is about.

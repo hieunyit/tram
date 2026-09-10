@@ -83,7 +83,8 @@ tram asks you, and holds the answer for the rest of the run so that the other
 hosts sharing that key file do not ask again. Quit tram and it is gone. A host
 key confirmation is refused permanently: answering "yes" to an unknown
 fingerprint on your behalf would turn a warning about interception into a
-silent accept.
+silent accept. The question is put to you instead, with ssh's own wording and
+fingerprint, and whatever you type goes straight back.
 
 ## Typing a key passphrase once
 
@@ -97,6 +98,11 @@ separate process. They live in a file only that run can read: the file holds
 ciphertext, the key exists only in the tram process and the children it starts,
 and the file is deleted on the way out. A crash leaves bytes nobody can decrypt
 rather than a passphrase on disk.
+
+When ssh asks anything else through the helper, a host key confirmation for a
+machine you have not met before, the question is shown to you as ssh wrote it
+and your answer is passed back unchanged. tram decides nothing there and
+remembers nothing.
 
 It engages only where it can work, and where it would otherwise be worse than
 nothing. ssh with the helper forced does not fall back to asking on its own, so

@@ -1,6 +1,7 @@
 package secret
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -52,6 +53,32 @@ func AskOnTTY(prompt string) (string, error) {
 		return "", fmt.Errorf("nothing entered")
 	}
 	return v, nil
+}
+
+// AskOnTTYVisible puts a question on the console and returns the answer, with
+// the typing shown.
+//
+// It is for the host key question, whose answer is "yes", "no" or a
+// fingerprint. None of those is a secret, and hiding what you type while asking
+// you to compare a fingerprint would be its own small cruelty.
+func AskOnTTYVisible(prompt string) (string, error) {
+	in, out, err := openTTY()
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		in.Close()
+		if out != in {
+			out.Close()
+		}
+	}()
+
+	fmt.Fprint(out, prompt)
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && line == "" {
+		return "", fmt.Errorf("read from the console: %w", err)
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 // NoteOnTTY writes a line to the console, for telling the user what tram just

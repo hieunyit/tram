@@ -185,23 +185,40 @@ func startAgent(t *testing.T, agent, dir string) (string, func()) {
 	}
 }
 
-// TestAskpassNeverAnswersHostKeyQuestions is a rule rather than a behaviour:
-// answering "yes" to an unrecognised fingerprint on the user's behalf would
-// turn a warning about a possible interception into a silent accept.
-func TestAskpassNeverAnswersHostKeyQuestions(t *testing.T) {
+// TestHostKeyQuestionsAreRelayedNotAnswered pins down the rule and the shape of
+// it.
+//
+// tram must never produce the answer itself: saying "yes" to an unrecognised
+// fingerprint on someone's behalf turns a warning about a possible interception
+// into a silent accept. But it must not refuse either. With the helper forced,
+// ssh does not fall back to asking on its own, so refusing meant the first
+// connection to any new host died with "Host key verification failed" and no
+// way to accept. The question goes to the person; their answer goes back
+// unchanged.
+//
+// What can be checked without a console is the routing: these prompts are
+// recognised as host key questions, so they take the relay path, and none of
+// them is mistaken for a passphrase prompt and served out of the cache.
+func TestHostKeyQuestionsAreRelayedNotAnswered(t *testing.T) {
 	prompts := []string{
 		"The authenticity of host 'x (1.2.3.4)' can't be established.\nED25519 key fingerprint is SHA256:abc.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ",
 		"@@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@@",
 		"Host key verification failed.",
 	}
 	for _, p := range prompts {
-		var sb strings.Builder
-		if err := Askpass(p, &sb); err == nil {
-			t.Errorf("answered a host key question with %q", sb.String())
+		if !hostKeyPrompt.MatchString(p) {
+			t.Errorf("not recognised as a host key question: %q", p)
 		}
-		if sb.Len() != 0 {
-			t.Errorf("wrote %q to ssh for a host key question", sb.String())
+		if key, ok := PassphrasePath(p); ok {
+			t.Errorf("read as a passphrase prompt for %q, which would serve it from the cache", key)
 		}
+	}
+
+	// And the passphrase prompt must not be swept up by the host key pattern,
+	// or every passphrase would go to the relay instead of the cache.
+	passphrase := "Enter passphrase for key '/home/me/.ssh/id_ed25519': "
+	if hostKeyPrompt.MatchString(passphrase) {
+		t.Error("a passphrase prompt was classified as a host key question")
 	}
 }
 
