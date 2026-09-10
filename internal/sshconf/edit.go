@@ -293,3 +293,15 @@ func ReplaceBody(b *Block, lines []Line) {
 	}
 	f.splice(b.Head+1, contentEnd(b), lines)
 }
+
+// ReplaceLead swaps the comment run that introduces a stanza, above its Host
+// line, for the given lines.
+func ReplaceLead(b *Block, lines []Line) {
+	f := b.File
+	for i := range lines {
+		if lines[i].EOL == "" {
+			lines[i].EOL = f.EOL
+		}
+	}
+	f.splice(b.Lead, b.Head, lines)
+}

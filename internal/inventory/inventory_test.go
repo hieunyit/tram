@@ -416,3 +416,104 @@ func TestPortTwentyTwoIsNotWritten(t *testing.T) {
 		t.Errorf("tram wrote the default port:\n%s", read(t, inv))
 	}
 }
+
+// legacyFixture is a configuration written by the tool tram replaces. Two
+// things about it matter: the markers use the old spelling, and they sit above
+// the Host line rather than inside the stanza.
+const legacyFixture = `#sshfleet:group=giavang/web-chat
+#sshfleet:desc=web chat gia vang
+Host chat-gia-vang
+    HostName 45.76.202.178
+    User root
+    Port 22
+`
+
+// TestLegacyMarkersAreRead is the difference between a first run that shows
+// your groups and one that silently shows none.
+//
+// tram shares no code with the tool it replaces, but the people most likely to
+// run it are the ones whose ssh_config already carries its markers.
+func TestLegacyMarkersAreRead(t *testing.T) {
+	inv := setup(t, legacyFixture)
+	h, ok := inv.Host("chat-gia-vang")
+	if !ok {
+		t.Fatal("host not found")
+	}
+	if h.Group != "giavang/web-chat" {
+		t.Errorf("group = %q; a marker above the Host line was not read", h.Group)
+	}
+	if h.Desc != "web chat gia vang" {
+		t.Errorf("desc = %q", h.Desc)
+	}
+	if got := model.Names(inv.Select(Filter{Group: "giavang"})); len(got) != 1 {
+		t.Errorf("filtering by the inherited group found %v", got)
+	}
+}
+
+// TestMarkerAboveTheHostLineIsRead covers tram's own spelling in the same
+// place, since a person editing by hand may well put it there.
+func TestMarkerAboveTheHostLineIsRead(t *testing.T) {
+	inv := setup(t, "#tram-group: prod/web\n#tram-desc: the web one\nHost w\n    HostName 1.1.1.1\n")
+	h, _ := inv.Host("w")
+	if h.Group != "prod/web" || h.Desc != "the web one" {
+		t.Errorf("group %q desc %q", h.Group, h.Desc)
+	}
+}
+
+// TestWritingReplacesLegacyMarkers checks that an edit migrates the old
+// spelling instead of leaving a second copy above the new one, where the reader
+// would take whichever it saw last.
+func TestWritingReplacesLegacyMarkers(t *testing.T) {
+	inv := setup(t, legacyFixture)
+	apply := applier(t)
+	apply(inv.Edit("chat-gia-vang", Spec{Name: "chat-gia-vang", Group: Str("giavang/web")}, false))
+
+	got := read(t, inv)
+	if strings.Contains(got, "sshfleet") {
+		t.Errorf("the old marker was left behind:\n%s", got)
+	}
+	if strings.Count(got, groupMarker) != 1 {
+		t.Errorf("expected exactly one group marker:\n%s", got)
+	}
+
+	h, _ := inv.Host("chat-gia-vang")
+	if h.Group != "giavang/web" {
+		t.Errorf("group = %q", h.Group)
+	}
+	// Changing the group must not take the description with it. The two share
+	// one rewrite, and a field the caller said nothing about is one to leave.
+	if h.Desc != "web chat gia vang" {
+		t.Errorf("the description was lost by an edit that never mentioned it: %q", h.Desc)
+	}
+}
+
+// TestEditingDescriptionKeepsTheGroup is the same rule the other way round.
+func TestEditingDescriptionKeepsTheGroup(t *testing.T) {
+	inv := setup(t, fixture)
+	apply := applier(t)
+	apply(inv.Edit("web1", Spec{Name: "web1", Desc: Str("changed")}, false))
+
+	h, _ := inv.Host("web1")
+	if h.Group != "prod/web" {
+		t.Errorf("the group was lost: %q", h.Group)
+	}
+	if h.Desc != "changed" {
+		t.Errorf("desc = %q", h.Desc)
+	}
+}
+
+// TestClearingAMarkerStillWorks checks that an explicit empty value removes it,
+// which is different from saying nothing about it.
+func TestClearingAMarkerStillWorks(t *testing.T) {
+	inv := setup(t, fixture)
+	apply := applier(t)
+	apply(inv.Edit("web1", Spec{Name: "web1", Group: Str("")}, false))
+
+	h, _ := inv.Host("web1")
+	if h.Group != "" {
+		t.Errorf("an explicit empty group did not clear it: %q", h.Group)
+	}
+	if h.Desc != "Primary web server" {
+		t.Errorf("clearing the group took the description: %q", h.Desc)
+	}
+}

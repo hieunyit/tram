@@ -129,15 +129,31 @@ func hostFromBlock(b *sshconf.Block, names []string) model.Host {
 		File:          b.File.Path,
 		Line:          b.Head + 1,
 	}
+	// The comment run that introduces a stanza belongs to it, so a marker
+	// written above the Host line counts. Some tools put them there, and a
+	// marker tram cannot see is a group the user silently loses.
+	for _, l := range b.LeadLines() {
+		if g, d, ok := readMarker(l.Raw); ok {
+			if g != "" {
+				h.Group = g
+			}
+			if d != "" {
+				h.Desc = d
+			}
+		}
+	}
+
 	known := map[string]bool{"hostname": true, "user": true, "port": true, "identityfile": true, "proxyjump": true}
 	for _, l := range b.Body() {
 		switch {
 		case l.Kind == sshconf.LineComment:
-			if v, ok := markerValue(l.Raw, groupMarker); ok {
-				h.Group = v
-			}
-			if v, ok := markerValue(l.Raw, descMarker); ok {
-				h.Desc = v
+			if g, d, ok := readMarker(l.Raw); ok {
+				if g != "" {
+					h.Group = g
+				}
+				if d != "" {
+					h.Desc = d
+				}
 			}
 		case l.Kind == sshconf.LineDirective && !known[strings.ToLower(l.Keyword)]:
 			k := l.Keyword
@@ -156,6 +172,46 @@ func markerValue(raw, marker string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(strings.TrimPrefix(t, marker)), true
+}
+
+// legacyMarkers are the spellings written by sshfleet, the tool tram replaces.
+//
+// tram is a rewrite and shares no code with it, but it does not share a
+// configuration format either, and the people most likely to run tram are the
+// ones whose ssh_config already carries these lines. Reading them costs two
+// string comparisons; not reading them means someone's groups vanish the first
+// time they run the new tool, with nothing on screen to say why.
+var legacyMarkers = []struct{ group, desc string }{
+	{"#sshfleet:group=", "#sshfleet:desc="},
+	{"#sshm:group=", "#sshm:desc="},
+}
+
+// readMarker reads a group or description out of a comment, in tram's own
+// spelling or in one it inherited. It reports which of the two it found.
+func readMarker(raw string) (group, desc string, ok bool) {
+	if v, hit := markerValue(raw, groupMarker); hit {
+		return v, "", true
+	}
+	if v, hit := markerValue(raw, descMarker); hit {
+		return "", v, true
+	}
+	for _, m := range legacyMarkers {
+		if v, hit := markerValue(raw, m.group); hit {
+			return v, "", true
+		}
+		if v, hit := markerValue(raw, m.desc); hit {
+			return "", v, true
+		}
+	}
+	return "", "", false
+}
+
+// isMarker reports whether a line is one of tram's metadata comments, in any
+// spelling, so that rewriting the metadata replaces it rather than piling a
+// second copy on top.
+func isMarker(raw string) bool {
+	_, _, ok := readMarker(raw)
+	return ok
 }
 
 // driftFrom reports whether a host no longer matches the identity it is linked

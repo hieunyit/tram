@@ -181,6 +181,12 @@ thing: type a path, read the preview, press `w` to write it.
 OS keyring                    passwords and key passphrases
 ```
 
+Groups and descriptions are kept as comments inside the stanza, in tram's own
+spelling, and are also read from the comment run above the `Host` line and in
+the spelling used by sshfleet, the tool tram replaces. An existing
+configuration therefore keeps its groups on the first run, and the next edit to
+a host migrates its markers to tram's spelling without leaving a second copy.
+
 Delete `~/.config/tram/` entirely and `tram ls` still lists every host and
 `tram web1` still connects. You lose Recent, Favorites, snippets and account
 links. Groups and descriptions survive, because they are kept in `ssh_config`

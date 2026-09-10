@@ -319,25 +319,60 @@ func applyMarkers(b *sshconf.Block, s Spec) {
 		}
 	}
 
+	// Read what is there before removing it. The two markers share one rewrite,
+	// so changing the group must not take the description with it: a field the
+	// caller said nothing about is a field to leave alone.
+	curGroup, curDesc := "", ""
+	for _, l := range append(append([]sshconf.Line{}, b.LeadLines()...), b.Body()...) {
+		if g, d, ok := readMarker(l.Raw); ok {
+			if g != "" {
+				curGroup = g
+			}
+			if d != "" {
+				curDesc = d
+			}
+		}
+	}
+
+	// Clear the old metadata from both places it can live: inside the stanza,
+	// where tram writes it, and in the comment run above the Host line, where
+	// another tool may have. Missing the second would leave the old value sitting
+	// above the new one, and the reader takes the last it sees.
+	var keepLead []sshconf.Line
+	for _, l := range b.LeadLines() {
+		if !isMarker(l.Raw) {
+			keepLead = append(keepLead, l)
+		}
+	}
+	if len(keepLead) != len(b.LeadLines()) {
+		sshconf.ReplaceLead(b, keepLead)
+		if nb := reblockAt(f, b.Names()); nb != nil {
+			b = nb
+		}
+	}
+
 	var keep []sshconf.Line
 	for _, l := range b.Body() {
-		if _, ok := markerValue(l.Raw, groupMarker); ok {
-			continue
-		}
-		if _, ok := markerValue(l.Raw, descMarker); ok {
+		if isMarker(l.Raw) {
 			continue
 		}
 		keep = append(keep, l)
 	}
 
-	var head []sshconf.Line
-	group := s.Group
-	desc := s.Desc
-	if group != nil && *group != "" {
-		head = append(head, sshconf.RawLine(f, indent+groupMarker+" "+*group))
+	group, desc := curGroup, curDesc
+	if s.Group != nil {
+		group = *s.Group
 	}
-	if desc != nil && *desc != "" {
-		head = append(head, sshconf.RawLine(f, indent+descMarker+" "+*desc))
+	if s.Desc != nil {
+		desc = *s.Desc
+	}
+
+	var head []sshconf.Line
+	if group != "" {
+		head = append(head, sshconf.RawLine(f, indent+groupMarker+" "+group))
+	}
+	if desc != "" {
+		head = append(head, sshconf.RawLine(f, indent+descMarker+" "+desc))
 	}
 	sshconf.ReplaceBody(b, append(head, keep...))
 }
@@ -572,4 +607,19 @@ func (inv *Inventory) Init(sshDir string) (*InitResult, error) {
 	res.IncludeAdded = true
 	res.Change = ch
 	return res, nil
+}
+
+// reblockAt finds a stanza again by any of its names, after an edit rebuilt the
+// block index and invalidated the pointer.
+func reblockAt(f *sshconf.File, names []string) *sshconf.Block {
+	for _, b := range f.Blocks {
+		for _, n := range b.Names() {
+			for _, want := range names {
+				if strings.EqualFold(n, want) {
+					return b
+				}
+			}
+		}
+	}
+	return nil
 }

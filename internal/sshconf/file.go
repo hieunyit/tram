@@ -79,6 +79,10 @@ func (b *Block) Lines() []Line { return b.File.Lines[b.Head:b.End] }
 // Body returns the stanza's lines below the Host line.
 func (b *Block) Body() []Line { return b.File.Lines[b.Head+1 : b.End] }
 
+// LeadLines returns the comment run that introduces the stanza, above its Host
+// line. It is empty when there is none.
+func (b *Block) LeadLines() []Line { return b.File.Lines[b.Lead:b.Head] }
+
 // Get returns the arguments of the first occurrence of keyword kw. ssh honours
 // the first value it sees for most keywords, so this is the effective one.
 func (b *Block) Get(kw string) ([]string, bool) {
