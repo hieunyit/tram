@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
+
 	"github.com/hieuny/tram/internal/model"
 )
 
@@ -126,15 +129,16 @@ func (m *Model) sidebarWidth() int {
 	}
 	w := 22
 	for _, r := range m.groupRows {
-		if n := len(r.label) + r.depth*2 + 8; n > w {
+		if n := runewidth.StringWidth(r.label) + r.depth*2 + 8; n > w {
 			w = n
 		}
 	}
 	return clamp(w, 18, m.width/3)
 }
 
-// renderSidebar draws the group pane, one row per line, padded to the height of
-// the host list so the two panes stay level.
+// renderSidebar draws the group pane, one string per row. Padding it to a
+// width or a height is not its job: joinPanes does that, because doing it by
+// hand is what put the two panes two columns out of step.
 func (m *Model) renderSidebar(height int) []string {
 	w := m.sidebarWidth()
 	if w == 0 {
@@ -160,9 +164,8 @@ func (m *Model) renderSidebar(height int) []string {
 		count := fmt.Sprintf("%d", r.count)
 
 		label := indent + marker + " " + r.label
-		room := w - len(count) - 2
-		label = pad(label, max(1, room))
-		line := " " + label + " " + count
+		room := w - runewidth.StringWidth(count) - 2
+		line := " " + pad(label, max(1, room)) + " " + count
 
 		switch {
 		case i == m.groupCursor && m.focus == focusGroups:
@@ -174,8 +177,29 @@ func (m *Model) renderSidebar(height int) []string {
 		}
 		out = append(out, line)
 	}
-	for len(out) < height {
-		out = append(out, strings.Repeat(" ", w+2))
-	}
 	return out
+}
+
+// joinPanes puts the group pane beside the host list.
+//
+// The layout library does the padding, in both directions. Counting spaces by
+// hand is how the two panes ended up misaligned: a row with a group in it and a
+// row without were built by different code and came out different widths, so
+// every host below the last group sat two columns to the right.
+func (m *Model) joinPanes(side, rows []string, height int) string {
+	hosts := strings.Join(rows, "\n")
+	w := m.sidebarWidth()
+	if w == 0 || len(side) == 0 {
+		return hosts
+	}
+
+	pane := lipgloss.NewStyle().Width(w).Height(height).Render(strings.Join(side, "\n"))
+
+	bars := make([]string, height)
+	for i := range bars {
+		bars[i] = m.gl.vbar
+	}
+	bar := lipgloss.NewStyle().Foreground(colMuted).Render(strings.Join(bars, "\n"))
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, pane, bar, hosts)
 }

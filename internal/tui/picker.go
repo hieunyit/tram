@@ -139,7 +139,7 @@ func (p *picker) view(width, height int) string {
 		c := p.visible[i]
 		marker := "  "
 		if i == p.cursor {
-			marker = p.st.selected.Render(p.gl.arrow[:1]) + " "
+			marker = p.st.selected.Render(p.gl.point) + " "
 		}
 		label := pad(c.label, labelW)
 		line := marker + label

@@ -240,7 +240,6 @@ func (m *Model) viewList() string {
 	}
 
 	h := m.listHeight()
-	side := m.renderSidebar(h)
 
 	var rows []string
 	if len(m.filtered) == 0 {
@@ -254,16 +253,7 @@ func (m *Model) viewList() string {
 	for len(rows) < h {
 		rows = append(rows, "")
 	}
-
-	// The two panes are written a line at a time so they stay level, whatever
-	// either of them contains.
-	for i := 0; i < h; i++ {
-		if len(side) == h {
-			b.WriteString(side[i] + m.st.muted.Render(m.gl.vbar) + rows[i] + "\n")
-			continue
-		}
-		b.WriteString(rows[i] + "\n")
-	}
+	b.WriteString(m.joinPanes(m.renderSidebar(h), rows, h) + "\n")
 
 	if m.detail {
 		b.WriteString(m.renderDetail())
@@ -297,7 +287,9 @@ func (m *Model) header() string {
 	}
 	// The headings sit over the host list, not over the group pane.
 	if w := m.sidebarWidth(); w > 0 {
-		return m.st.header.Render(pad("GROUPS", w+2)) + m.st.header.Render(cols)
+		// The heading spans the pane and the divider, so the host columns start
+		// exactly where the host rows do.
+		return m.st.header.Render(pad("GROUPS", w+runewidth.StringWidth(m.gl.vbar))) + m.st.header.Render(cols)
 	}
 	return m.st.header.Render(cols)
 }
@@ -309,7 +301,7 @@ func (m *Model) renderRow(h model.Host, sel bool) string {
 	if m.marked[h.Name] {
 		prefix = m.st.marked.Render(m.gl.marked) + " "
 	} else if sel {
-		prefix = m.st.selected.Render(m.gl.arrow[:1]) + " "
+		prefix = m.st.selected.Render(m.gl.point) + " "
 	}
 
 	name := h.Name

@@ -68,11 +68,12 @@ type glyphs struct {
 	opened   string
 	closed   string
 	vbar     string
+	point    string
 }
 
 func newGlyphs(ascii bool) glyphs {
 	if ascii {
-		return glyphs{star: "*", clock: "~", check: "ok", cross: "!!", dot: "-", arrow: "->", marked: "[x]", unmarked: "[ ]", drift: "*", plus: "+", opened: "-", closed: "+", vbar: "| "}
+		return glyphs{star: "*", clock: "~", check: "ok", cross: "!!", dot: "-", arrow: "->", marked: "[x]", unmarked: "[ ]", drift: "*", plus: "+", opened: "-", closed: "+", vbar: "| ", point: ">"}
 	}
-	return glyphs{star: "★", clock: "🕒", check: "✓", cross: "✗", dot: "·", arrow: "→", marked: "◉", unmarked: "○", drift: "*", plus: "＋", opened: "▾", closed: "▸", vbar: "│ "}
+	return glyphs{star: "★", clock: "🕒", check: "✓", cross: "✗", dot: "·", arrow: "→", marked: "◉", unmarked: "○", drift: "*", plus: "＋", opened: "▾", closed: "▸", vbar: "│ ", point: "❯"}
 }

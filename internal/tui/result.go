@@ -116,7 +116,7 @@ func (m *Model) viewResult() string {
 	for i, row := range r.rows {
 		marker := "  "
 		if i == r.cursor {
-			marker = m.st.selected.Render(m.gl.arrow[:1]) + " "
+			marker = m.st.selected.Render(m.gl.point) + " "
 		}
 		badge := m.st.ok.Render(m.gl.check)
 		if !row.OK {
