@@ -41,25 +41,20 @@ type Request struct {
 	Extra []string
 }
 
-// AskpassSetup carries what ssh needs to ask tram for a secret without the
-// secret ever appearing on a command line or in an environment variable.
+// AskpassSetup carries what ssh needs to ask tram a question, without any
+// secret travelling with it.
 type AskpassSetup struct {
 	// Enabled turns the helper on for this session.
 	Enabled bool
 	// Binary is the path to tram itself, which ssh re-invokes in askpass mode.
 	Binary string
-	// Token identifies which secret to serve, and is meaningless on its own.
-	Token string
 	// Force sets SSH_ASKPASS_REQUIRE=force so that ssh uses the helper even
-	// when it has a real terminal and would otherwise prompt directly.
+	// when it has a real terminal and would otherwise ask directly.
 	Force bool
-	// Learn, when set, lets the helper ask the user for a secret it does not
-	// have and park the answer under this nonce. It is an identifier, not a
-	// secret, and means nothing to anyone who reads it.
-	Learn string
-	// Host names the destination, so the helper can tell a prompt about it
-	// from one about a jump station along the way.
-	Host string
+	// Session names the run whose cached passphrases the helper may use. The
+	// values it carries are a file path and the key that opens it, both of
+	// which die with this process.
+	Session []string
 }
 
 // Argv builds the ssh command line for a request.
@@ -91,12 +86,10 @@ func (r Request) Env() []string {
 		return env
 	}
 	env = setEnv(env, "SSH_ASKPASS", r.Askpass.Binary)
-	env = setEnv(env, "TRAM_ASKPASS_TOKEN", r.Askpass.Token)
-	if r.Askpass.Learn != "" {
-		env = setEnv(env, "TRAM_ASKPASS_LEARN", r.Askpass.Learn)
-	}
-	if r.Askpass.Host != "" {
-		env = setEnv(env, "TRAM_ASKPASS_HOST", r.Askpass.Host)
+	for _, kv := range r.Askpass.Session {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			env = setEnv(env, k, v)
+		}
 	}
 	if r.Askpass.Force {
 		// Without this ssh prefers to prompt on the terminal it already has,

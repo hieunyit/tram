@@ -3,14 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/launcher"
 	"github.com/hieuny/tram/internal/model"
 	"github.com/hieuny/tram/internal/render"
 	"github.com/hieuny/tram/internal/secret"
-	"github.com/hieuny/tram/internal/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -72,19 +70,10 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 	req := buildRequest(a, h.Name, remote, opt)
 	req.ForceTTY = req.ForceTTY && isTerminal(os.Stdin)
 
-	st := secret.New(store.Dir())
-	req.Askpass = askpassFor(a, inv, st, h)
+	req.Askpass = askpassFor(a, inv, h)
 
 	_ = inv.Store.Touch(h.Name)
 	res := launcher.Handoff(req.Argv(), req.Env())
-
-	// A secret typed during the session is only worth keeping if it opened the
-	// session. Committing on the way in would remember a typo forever. A remote
-	// command that exits non-zero still authenticated, so that counts as worked.
-	if note := settleLearned(st, req.Askpass, !res.SSHFailed); note != "" {
-		fmt.Fprintln(os.Stderr, note)
-		a.Note = note
-	}
 
 	if res.Err != nil {
 		return fmt.Errorf("could not start ssh: %w", res.Err)
@@ -98,120 +87,54 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 	return ExitCode{Code: res.ExitCode}
 }
 
-// askpassFor decides whether ssh should ask tram for the secrets it needs.
+// askpassFor decides whether ssh should route its questions through tram.
 //
-// The secret itself does not travel here. Only a subject name and a nonce go
-// into the child's environment, and ssh calls tram back on a separate
-// invocation to fetch or capture the value.
+// It does so for one reason: to reuse a key passphrase across the hosts that
+// share the key file, for as long as tram is running. Nothing is stored, so
+// there is nothing to arm the helper for on a host whose keys are not
+// passphrase protected, and those hosts are left to ssh entirely.
 //
-// Two cases arm the helper. One is a secret tram already holds, which is the
-// point of storing it. The other is the first connection to a host that has
-// none: the helper asks once, on the console, and the answer is remembered if
-// the session works. That is what turns "type it every time" into "type it
-// once", and it is why the helper is armed even when the keyring is empty.
-//
-// Both kinds of secret count. A key passphrase is looked for as carefully as a
-// password, because a host can perfectly well have a stored passphrase and no
-// password at all, and arming on the password alone would leave that passphrase
-// sitting in the keyring never being used.
-func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host) launcher.AskpassSetup {
+// The check before arming is not caution for its own sake. With the helper
+// forced, ssh does not fall back to asking on its own, so arming it where it
+// could not ask would fail the login with nothing on screen to explain why.
+func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.AskpassSetup {
+	if !inv.Store.Options.ReusePassphrase {
+		return launcher.AskpassSetup{}
+	}
+	if !hasEncryptedKey(h) {
+		return launcher.AskpassSetup{}
+	}
 	force, version := secret.SupportsAskpassRequire()
-
-	// A password set on the host wins over one set on its account, because the
-	// more specific answer is the one that was meant.
-	sub := secret.PasswordFor("host", h.Name)
-	_, err := st.Get(sub)
-	havePassword := err == nil
-	if !havePassword && h.Account != "" {
-		acct := secret.PasswordFor("account", h.Account)
-		if _, err := st.Get(acct); err == nil {
-			sub, havePassword = acct, true
-		}
-	}
-
-	if havePassword || haveStoredPassphrase(st, h) {
-		if !force {
-			fmt.Fprintf(os.Stderr,
-				"warning: a secret is stored for %s but %s has no SSH_ASKPASS_REQUIRE, so ssh will ask you instead\n",
-				h.Name, version)
-		}
-		return launcher.AskpassSetup{
-			Enabled: true,
-			Binary:  launcher.SelfPath(),
-			Token:   string(sub),
-			Host:    h.Name,
-			Force:   force,
-		}
-	}
-
-	// Nothing stored. Offer to learn one, but only when every part of the
-	// mechanism is actually there. Arming it otherwise would be worse than
-	// doing nothing: with SSH_ASKPASS_REQUIRE=force ssh does not fall back to
-	// asking on its own, so a helper with nowhere to prompt would fail the
-	// login with nothing on screen to explain why.
-	switch {
-	case !inv.Store.Options.RememberSecrets:
-		return launcher.AskpassSetup{}
-	case !force:
-		return launcher.AskpassSetup{}
-	case !secret.TTYAvailable():
+	if !force {
+		fmt.Fprintf(os.Stderr,
+			"note: %s has no SSH_ASKPASS_REQUIRE, so ssh will ask for the passphrase itself each time\n",
+			version)
 		return launcher.AskpassSetup{}
 	}
-
-	// A host linked to an account learns the password under that account, so
-	// the next host sharing the identity does not ask again. A password
-	// authenticates a login, not an address. A key passphrase needs no such
-	// choice: it belongs to the key file, and the helper keys it on the path
-	// ssh names in the prompt.
-	if h.Account != "" {
-		sub = secret.PasswordFor("account", h.Account)
+	// The helper asks on the console when it has no cached answer, so it needs
+	// somebody there to ask. Both checks matter: a console tram can open, and a
+	// run that a person is actually sitting at. Arming it in a script would
+	// block on a prompt nobody sees.
+	if !isTerminal(os.Stdin) || !secret.TTYAvailable() {
+		return launcher.AskpassSetup{}
 	}
 	return launcher.AskpassSetup{
 		Enabled: true,
 		Binary:  launcher.SelfPath(),
-		Token:   string(sub),
-		Host:    h.Name,
 		Force:   true,
-		Learn:   secret.NewNonce(),
+		Session: a.Session(),
 	}
 }
 
-// haveStoredPassphrase reports whether any key this host would offer already
-// has its passphrase in the keyring.
-func haveStoredPassphrase(st *secret.Store, h model.Host) bool {
+// hasEncryptedKey reports whether any key this host would offer is passphrase
+// protected, which is the only case where reusing an answer helps.
+func hasEncryptedKey(h model.Host) bool {
 	for _, k := range h.IdentityFiles {
-		if _, err := st.Get(secret.PassphraseFor(k)); err == nil {
+		if info, err := secret.InspectKey(k); err == nil && info.Encrypted {
 			return true
 		}
 	}
 	return false
-}
-
-// settleLearned commits or discards whatever the helper captured, and returns
-// the line to tell the user about it, or "" when there is nothing to say.
-func settleLearned(st *secret.Store, setup launcher.AskpassSetup, worked bool) string {
-	if setup.Learn == "" {
-		return ""
-	}
-	l, ok := st.TakePending(setup.Learn)
-	if !ok {
-		return "" // ssh never had to ask
-	}
-	if !worked {
-		return "the session failed, so tram did not remember what you typed"
-	}
-	if err := st.Commit(l); err != nil {
-		return "tram could not save the secret: " + err.Error()
-	}
-	return fmt.Sprintf("tram remembered the %s for %s and will not ask again. Undo with `tram secret rm %s`.",
-		l.Subject.Kind(), l.Subject.Label(), lastField(l.Subject.Label()))
-}
-
-func lastField(s string) string {
-	if i := strings.LastIndex(s, " "); i >= 0 {
-		return s[i+1:]
-	}
-	return s
 }
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }

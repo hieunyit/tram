@@ -13,6 +13,7 @@ import (
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/model"
 	"github.com/hieuny/tram/internal/render"
+	"github.com/hieuny/tram/internal/secret"
 	"github.com/hieuny/tram/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -33,13 +34,36 @@ type App struct {
 	Force  bool
 	ASCII  bool
 
-	// Note carries something worth saying that happened during a session, such
-	// as a password tram has just remembered. The interface reads it after the
-	// session ends, because otherwise the line would be painted over before
-	// anyone could read it.
+	// Note carries something worth saying that happened during a session. The
+	// interface reads it afterwards, because otherwise the line would be
+	// painted over before anyone could read it.
 	Note string
 
-	inv *inventory.Inventory
+	inv  *inventory.Inventory
+	sess *secret.Session
+}
+
+// Session returns the environment a child needs to reach this run's passphrase
+// cache, creating the cache on first use.
+//
+// It is one run of tram, not one connection: that is what lets the second host
+// sharing a key file connect without asking. CloseSession ends it.
+func (a *App) Session() []string {
+	if a.sess == nil {
+		s, err := secret.OpenSession(store.Dir())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "warning: could not start a passphrase cache:", err)
+			return nil
+		}
+		a.sess = s
+	}
+	return a.sess.Env()
+}
+
+// CloseSession forgets every passphrase typed during this run.
+func (a *App) CloseSession() {
+	a.sess.Close()
+	a.sess = nil
 }
 
 var app = &App{}
@@ -178,7 +202,6 @@ is the only place tram keeps anything.`,
 		newArgsCmd(),
 		newSFTPCmd(),
 		newAccountCmd(),
-		newSecretCmd(),
 		newKeyCmd(),
 		newPingCmd(),
 		newDoctorCmd(),
@@ -323,3 +346,7 @@ func newVersionCmd() *cobra.Command {
 		},
 	}
 }
+
+// CloseSession forgets the passphrases held for this run. main defers it, so a
+// normal exit and an error exit both clear the cache.
+func CloseSession() { app.CloseSession() }

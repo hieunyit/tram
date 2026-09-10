@@ -77,61 +77,40 @@ sends you somewhere different. `doctor` walks a route one station at a time and
 stops at the first that fails, instead of reporting that a chain of three
 machines "could not connect".
 
-**5. Secrets live where the operating system keeps secrets.** The OS keyring,
-with an encrypted file as a fallback. A value never reaches `ssh_config`, never
-appears on a command line, never sits in an environment variable. ssh gets it by
-calling tram back as its askpass helper. A passphrase is checked against the key
-before it is stored. The helper answers exactly two questions and refuses host
-key confirmations permanently: answering "yes" to an unknown fingerprint on your
-behalf would turn a warning about interception into a silent accept.
+**5. A passphrase is typed once per run, and stored nowhere.** There is no
+keyring, no vault and no saved password. When ssh asks for a key passphrase,
+tram asks you, and holds the answer for the rest of the run so that the other
+hosts sharing that key file do not ask again. Quit tram and it is gone. A host
+key confirmation is refused permanently: answering "yes" to an unknown
+fingerprint on your behalf would turn a warning about interception into a
+silent accept.
 
-## Typing a password once
+## Typing a key passphrase once
 
-The first time a host asks for a password, tram asks for it on the console,
-hands it to ssh, and keeps it if the session opens. After that it answers the
-prompt itself and you are not asked again.
+Open a host whose key is passphrase protected, type the passphrase when ssh
+asks, and every other host in that run using the same key file connects without
+asking. Quit tram and the next run asks again. Nothing is written to a keyring,
+a vault or a configuration file.
 
-Three details make this safe to leave switched on. The answer is parked under a
-one-off identifier while the session runs and only written to the keyring once
-the connection has actually succeeded, so a typo is never remembered. The host
-named in ssh's own prompt decides which secret is served, so a jump station gets
-its own password rather than the destination's, and is asked for once on its own
-account. And a host linked to an account remembers the password under that
-account, so the next host sharing the identity does not ask at all.
+The answers cannot simply live in memory, because the helper ssh runs is a
+separate process. They live in a file only that run can read: the file holds
+ciphertext, the key exists only in the tram process and the children it starts,
+and the file is deleted on the way out. A crash leaves bytes nobody can decrypt
+rather than a passphrase on disk.
 
-The keyring is the operating system's, so it is shared by every tram process on
-the machine. Another tab, another window, after a reboot: the same host does not
-ask again. On Windows the credential is written to persist for this and every
-later logon session, which is what makes that true across a restart.
+It engages only where it can work, and where it would otherwise be worse than
+nothing. ssh with the helper forced does not fall back to asking on its own, so
+tram arms it only when there is an encrypted key to ask about, an OpenSSH new
+enough for `SSH_ASKPASS_REQUIRE` (8.4), a console to ask on, and a person
+sitting at it. In a script it stays out of the way entirely.
 
-`tram secret ls` shows what is stored and where, never the values.
-`tram secret rm <host>` forgets one. Setting `remember_secrets = false` in
-`config.toml` turns the whole thing off and leaves every prompt to ssh.
+Passwords are not tram's business. A host that authenticates with one is left
+to ssh, which asks exactly as it always did. Set `reuse_passphrase = false` in
+`config.toml` to leave passphrases to ssh as well.
 
-It only engages when it can work: OpenSSH 8.4 or newer, and a console to ask
-on. Below 8.4 there is no `SSH_ASKPASS_REQUIRE`, ssh prompts on its terminal
-and ignores any helper, and tram says so rather than pretending.
-
-### Key passphrases
-
-The same mechanism remembers a key's passphrase, with one difference that
-matters: a passphrase belongs to the key file, not to a host. Ten hosts sharing
-`~/.ssh/id_ed25519` ask once between them, not once each. The path is brought to
-one form before it is used as a key, so the `~/.ssh/id_ed25519` your
-configuration says and the absolute path ssh names in its prompt are the same
-thing.
-
-`tram key load <host>` is the other route: it hands the key to the ssh agent,
-which then answers for it and leaves tram out of the loop entirely. On Windows
-the agent is a service that survives reboots, so a key added once stays added.
-Use `-t 8h` if you would rather it expired.
-
-tram also works as a general askpass helper, whether or not it started the ssh.
-Point `SSH_ASKPASS` at the binary and set `SSH_ASKPASS_REQUIRE=force`, and every
-ssh on the machine is answered from the same keyring.
-
-If you own the far end, a key installed with `tram key push` is still a better
-answer than a remembered password.
+`tram key ls` shows which of a host's keys are passphrase protected, which is
+the question behind "why is it asking me again". If you own the far end, a key
+installed with `tram key push` beats typing anything.
 
 **6. The numbers match the tools you would check them against.** Not yet built;
 see the roadmap.
@@ -178,8 +157,10 @@ thing: type a path, read the preview, press `w` to write it.
 ├── history.json              last connected, and pinned hosts
 └── config.toml               tram's own options
 
-OS keyring                    passwords and key passphrases
 ```
+
+Nothing above holds a secret. A key passphrase lives only for the run that
+typed it.
 
 Groups and descriptions are kept as comments inside the stanza, in tram's own
 spelling, and are also read from the comment run above the `Host` line and in

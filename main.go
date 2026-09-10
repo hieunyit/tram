@@ -9,7 +9,6 @@ import (
 
 	"github.com/hieuny/tram/cmd"
 	"github.com/hieuny/tram/internal/secret"
-	"github.com/hieuny/tram/internal/store"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -20,39 +19,47 @@ func main() {
 
 	// ssh re-invokes tram as its askpass helper. That invocation is not a
 	// command line the user typed, so it is handled before cobra sees it: the
-	// helper writes one secret to standard output and exits, and answers
-	// nothing else.
+	// helper writes one answer to standard output and exits.
 	if secret.IsAskpassInvocation(os.Args[1:]) {
 		os.Exit(runAskpass())
 	}
+	os.Exit(run())
+}
 
-	root := cmd.Root()
-	if err := root.Execute(); err != nil {
+// run holds the whole of a normal invocation so that the cleanup can be
+// deferred. os.Exit does not run deferred functions, so calling it from main
+// directly would leave this run's passphrase cache behind on every exit,
+// including the successful ones.
+func run() int {
+	defer cmd.CloseSession()
+
+	if err := cmd.Root().Execute(); err != nil {
 		var ec cmd.ExitCode
 		if errors.As(err, &ec) {
 			if ec.Err != nil {
 				fmt.Fprintln(os.Stderr, "error:", ec.Err)
 			}
-			os.Exit(ec.Code)
+			return ec.Code
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // runAskpass answers one question from ssh.
 //
-// It answers a password or a key passphrase and nothing else. A host key
-// confirmation is refused on purpose: answering "yes" to an unrecognised
-// fingerprint on the user's behalf would turn a warning about a possible
-// interception into a silent accept.
+// It answers a key passphrase, reusing this run's if one was already typed, and
+// a password, which it forwards without keeping. A host key confirmation is
+// refused on purpose: answering "yes" to an unrecognised fingerprint on the
+// user's behalf would turn a warning about a possible interception into a
+// silent accept.
 func runAskpass() int {
 	prompt := ""
 	if len(os.Args) > 1 {
 		prompt = os.Args[1]
 	}
-	st := secret.New(store.Dir())
-	if err := secret.Askpass(st, prompt, os.Stdout); err != nil {
+	if err := secret.Askpass(prompt, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "tram askpass:", err)
 		return 1
 	}
