@@ -111,9 +111,22 @@ It only engages when it can work: OpenSSH 8.4 or newer, and a console to ask
 on. Below 8.4 there is no `SSH_ASKPASS_REQUIRE`, ssh prompts on its terminal
 and ignores any helper, and tram says so rather than pretending.
 
-The same mechanism remembers a key's passphrase. If you own the far end, a key
-installed with `tram key push` is still the better answer than a remembered
-password.
+### Key passphrases
+
+The same mechanism remembers a key's passphrase, with one difference that
+matters: a passphrase belongs to the key file, not to a host. Ten hosts sharing
+`~/.ssh/id_ed25519` ask once between them, not once each. The path is brought to
+one form before it is used as a key, so the `~/.ssh/id_ed25519` your
+configuration says and the absolute path ssh names in its prompt are the same
+thing.
+
+`tram key load <host>` is the other route: it hands the key to the ssh agent,
+which then answers for it and leaves tram out of the loop entirely. On Windows
+the agent is a service that survives reboots, so a key added once stays added.
+Use `-t 8h` if you would rather it expired.
+
+If you own the far end, a key installed with `tram key push` is still a better
+answer than a remembered password.
 
 **6. The numbers match the tools you would check them against.** Not yet built;
 see the roadmap.

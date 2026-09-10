@@ -109,24 +109,30 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 // none: the helper asks once, on the console, and the answer is remembered if
 // the session works. That is what turns "type it every time" into "type it
 // once", and it is why the helper is armed even when the keyring is empty.
+//
+// Both kinds of secret count. A key passphrase is looked for as carefully as a
+// password, because a host can perfectly well have a stored passphrase and no
+// password at all, and arming on the password alone would leave that passphrase
+// sitting in the keyring never being used.
 func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host) launcher.AskpassSetup {
 	force, version := secret.SupportsAskpassRequire()
 
 	// A password set on the host wins over one set on its account, because the
 	// more specific answer is the one that was meant.
 	sub := secret.PasswordFor("host", h.Name)
-	_, stored := st.Get(sub)
-	if stored != nil && h.Account != "" {
+	_, err := st.Get(sub)
+	havePassword := err == nil
+	if !havePassword && h.Account != "" {
 		acct := secret.PasswordFor("account", h.Account)
 		if _, err := st.Get(acct); err == nil {
-			sub, stored = acct, nil
+			sub, havePassword = acct, true
 		}
 	}
 
-	if stored == nil {
+	if havePassword || haveStoredPassphrase(st, h) {
 		if !force {
 			fmt.Fprintf(os.Stderr,
-				"warning: a password is stored for %s but %s has no SSH_ASKPASS_REQUIRE, so ssh will prompt instead\n",
+				"warning: a secret is stored for %s but %s has no SSH_ASKPASS_REQUIRE, so ssh will ask you instead\n",
 				h.Name, version)
 		}
 		return launcher.AskpassSetup{
@@ -154,7 +160,9 @@ func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host
 
 	// A host linked to an account learns the password under that account, so
 	// the next host sharing the identity does not ask again. A password
-	// authenticates a login, not an address.
+	// authenticates a login, not an address. A key passphrase needs no such
+	// choice: it belongs to the key file, and the helper keys it on the path
+	// ssh names in the prompt.
 	if h.Account != "" {
 		sub = secret.PasswordFor("account", h.Account)
 	}
@@ -166,6 +174,17 @@ func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host
 		Force:   true,
 		Learn:   secret.NewNonce(),
 	}
+}
+
+// haveStoredPassphrase reports whether any key this host would offer already
+// has its passphrase in the keyring.
+func haveStoredPassphrase(st *secret.Store, h model.Host) bool {
+	for _, k := range h.IdentityFiles {
+		if _, err := st.Get(secret.PassphraseFor(k)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // settleLearned commits or discards whatever the helper captured, and returns

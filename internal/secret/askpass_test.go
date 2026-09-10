@@ -418,3 +418,47 @@ func TestAccountPasswordIsNotGivenToAMachineOnTheWay(t *testing.T) {
 		t.Errorf("the station was served %q", got)
 	}
 }
+
+// TestPassphraseFoundWhateverTheKeyPathLooksLike covers a mismatch that would
+// fail silently.
+//
+// A configuration says IdentityFile ~/.ssh/id_ed25519, so that is the spelling
+// tram stores under. ssh asks for the passphrase using the path it resolved,
+// absolute and with the platform's separators. If the two are not brought to
+// the same form, the passphrase is in the keyring and is never found.
+func TestPassphraseFoundWhateverTheKeyPathLooksLike(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	abs := filepath.Join(home, ".ssh", "id_tram_probe")
+	spellings := []string{
+		"~/.ssh/id_tram_probe",
+		abs,
+		filepath.ToSlash(abs),
+		`"~/.ssh/id_tram_probe"`,
+		strings.ToUpper(abs[:1]) + abs[1:],
+	}
+
+	want := PassphraseFor(spellings[0])
+	for _, s := range spellings {
+		if got := PassphraseFor(s); got != want {
+			t.Errorf("%q maps to subject %q, want %q", s, got, want)
+		}
+	}
+
+	st := New(t.TempDir())
+	if err := st.Set(want, "opens-it"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Delete(want) })
+
+	// ssh names the resolved path in its prompt, not the one from the file.
+	var sb strings.Builder
+	if err := Askpass(st, "Enter passphrase for "+abs+": ", &sb); err != nil {
+		t.Fatalf("stored from the configuration's spelling, not found from ssh's: %v", err)
+	}
+	if got := strings.TrimSpace(sb.String()); got != "opens-it" {
+		t.Errorf("served %q", got)
+	}
+}
