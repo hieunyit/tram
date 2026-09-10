@@ -63,16 +63,56 @@ type Result struct {
 	Skipped []string `json:"skipped"`
 }
 
-// Options adjusts how a file is read.
+// Options adjusts how a file is read and what every host it yields is set to.
 type Options struct {
 	// Format overrides detection.
 	Format Format
-	// GroupPrefix is prepended to every group, so an inventory can be filed
-	// under a heading of its own.
-	GroupPrefix string
 	// FlatGroups turns off the nesting built from Ansible's children sections,
 	// keeping only the group the host is directly in.
 	FlatGroups bool
+
+	// Group puts every imported host in this one group, replacing whatever the
+	// file said. This is the plain reading of "import these into vpb-prod".
+	Group string
+	// GroupPrefix instead keeps the file's own groups and nests them under this
+	// one, so an inventory with a structure worth having keeps it. Group wins
+	// when both are given, because it is the more definite instruction.
+	GroupPrefix string
+
+	// Set is applied to every host the file yields, replacing what the file
+	// said. It is how an inventory that names machines but not how to log in to
+	// them becomes usable in one pass, rather than by editing each host after.
+	Set Overrides
+}
+
+// Overrides are the fields an import can put on every host at once. An empty
+// field means the file's own value stands.
+type Overrides struct {
+	User      string
+	Key       string
+	ProxyJump string
+	Account   string
+}
+
+// Any reports whether anything would be overridden.
+func (o Overrides) Any() bool {
+	return o.User != "" || o.Key != "" || o.ProxyJump != "" || o.Account != ""
+}
+
+// apply puts the overrides on one record.
+func (o Overrides) apply(r *Record) {
+	if o.User != "" {
+		r.User = o.User
+	}
+	if o.Key != "" {
+		r.Key = o.Key
+	}
+	if o.ProxyJump != "" {
+		r.ProxyJump = o.ProxyJump
+	}
+	if o.Account != "" {
+		r.Account = o.Account
+	}
 }
 
 // Parse reads a file and returns the hosts it describes.
@@ -103,17 +143,21 @@ func Parse(path string, opt Options) (*Result, error) {
 	}
 	res.Format, res.Path = f, path
 
+	fixed := NormaliseGroup(opt.Group)
 	prefix := NormaliseGroup(opt.GroupPrefix)
 	for i := range res.Records {
-		g := NormaliseGroup(res.Records[i].Group)
-		switch {
+		rec := &res.Records[i]
+		switch g := NormaliseGroup(rec.Group); {
+		case fixed != "":
+			rec.Group = fixed
 		case prefix == "":
+			rec.Group = g
 		case g == "":
-			g = prefix
+			rec.Group = prefix
 		default:
-			g = prefix + "/" + g
+			rec.Group = prefix + "/" + g
 		}
-		res.Records[i].Group = g
+		opt.Set.apply(rec)
 	}
 	return res, nil
 }

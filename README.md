@@ -141,6 +141,14 @@ child of `prod`, lands in `prod/webservers`. A host in several groups keeps the
 most specific one, and the rest are reported rather than dropped in silence.
 Host ranges such as `web[01:04]` are expanded, zero padding and all.
 
+`--group` replaces all of that with one group of your own. `--group-prefix`
+keeps the file's structure and nests it under yours instead.
+
+An inventory often names machines without saying how to log in to them.
+`--user`, `--key`, `--jump` and `--account` set those on every host in one pass,
+so they do not have to be edited in afterwards one at a time. The import screen
+has the same fields.
+
 A host Ansible reaches some other way, say `ansible_connection=local`, is
 skipped and named. ssh cannot be pointed at it, so importing it would only
 create a stanza that fails.

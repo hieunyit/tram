@@ -189,6 +189,19 @@ func (m *Model) openFieldPicker(id fieldID) (tea.Model, tea.Cmd) {
 			return nil
 		})
 	case fJump:
+		if m.form.kind == formImport {
+			// An import has no one host to check for loops against, so every
+			// station is offered and the check happens when each host is written.
+			items := []choice{{value: "", label: "(keep the file's own)"}}
+			for _, h := range m.inv.Hosts() {
+				items = append(items, choice{value: h.Name, label: h.Name, note: h.Target()})
+			}
+			m.showPicker("jump station for every imported host", items, func(v string) tea.Cmd {
+				m.form.set(fJump, v)
+				return nil
+			})
+			return m, nil
+		}
 		items := m.jumpChoices(m.form.get(fName))
 		m.showPicker("jump station", items, func(v string) tea.Cmd {
 			m.form.set(fJump, v)

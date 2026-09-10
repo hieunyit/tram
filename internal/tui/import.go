@@ -23,7 +23,15 @@ func (m *Model) openImportForm() {
 	f.fields = []*field{
 		{id: fPath, label: "file", input: newInput("", "press enter to browse"), pick: true,
 			hint: "enter opens the folder; or type a path and press ctrl+s"},
-		{id: fGroup, label: "under", input: newInput("", "keep the file's own groups"), hint: "optional group to file everything under"},
+		{id: fGroup, label: "group", input: newInput("", "keep the file's own groups"), pick: true,
+			hint: "puts every host in this group, replacing the file's"},
+		{id: fUser, label: "user", input: newInput("", "keep the file's own"),
+			hint: "set on every host; an inventory often names machines but not logins"},
+		{id: fKey, label: "key", input: newInput("", "keep the file's own"), hint: "IdentityFile for every host"},
+		{id: fJump, label: "jump", input: newInput("", "keep the file's own"), pick: true,
+			hint: "ProxyJump for every host"},
+		{id: fAccount, label: "account", input: newInput("", "none"), pick: true,
+			hint: "link every host to this identity"},
 	}
 	f.focus(0)
 	m.form = f
@@ -42,7 +50,15 @@ func (m *Model) submitImport() (tea.Model, tea.Cmd) {
 		f.problem = "no file given"
 		return m, nil
 	}
-	plan, err := m.inv.PlanImport(path, importer.Options{GroupPrefix: f.get(fGroup)}, false)
+	plan, err := m.inv.PlanImport(path, importer.Options{
+		Group: f.get(fGroup),
+		Set: importer.Overrides{
+			User:      f.get(fUser),
+			Key:       f.get(fKey),
+			ProxyJump: f.get(fJump),
+			Account:   f.get(fAccount),
+		},
+	}, false)
 	if err != nil {
 		f.problem = err.Error()
 		return m, nil

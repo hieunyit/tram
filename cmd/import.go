@@ -14,9 +14,11 @@ import (
 func newImportCmd() *cobra.Command {
 	var (
 		group     string
+		prefix    string
 		format    string
 		overwrite bool
 		flat      bool
+		set       importer.Overrides
 	)
 	c := &cobra.Command{
 		Use:   "import <file>",
@@ -43,11 +45,20 @@ Ansible's group nesting becomes tram's group path: a host in webservers, where
 webservers is a child of prod, lands in prod/webservers. A host in several
 groups keeps the most specific one, and the others are reported.
 
+--group replaces all of that with one group of your own. --group-prefix keeps
+the file's structure and nests it under yours instead, which is the right one
+when the inventory's groups are worth having.
+
+An inventory often names machines without saying how to log in to them. --user,
+--key, --jump and --account set those on every host in one pass, so they do not
+have to be edited in afterwards one at a time.
+
 An existing host is left alone unless you pass --overwrite, and even then a
 host outside tram's managed file needs --force as well.`,
 		Args: cobra.ExactArgs(1),
 		Example: `  tram import inventory.ini --dry-run
-  tram import hosts.yml --group imported
+  tram import inventory.ini -g vpb-prod -u root -k ~/.ssh/id_ed25519
+  tram import hosts.yml --group-prefix imported
   tram import servers.csv --overwrite`,
 		RunE: func(c *cobra.Command, args []string) error {
 			if err := app.resolveFormat(); err != nil {
@@ -59,8 +70,10 @@ host outside tram's managed file needs --force as well.`,
 			}
 			plan, err := inv.PlanImport(args[0], importer.Options{
 				Format:      importer.Format(format),
-				GroupPrefix: group,
+				Group:       group,
+				GroupPrefix: prefix,
 				FlatGroups:  flat,
+				Set:         set,
 			}, overwrite)
 			if err != nil {
 				return err
@@ -69,7 +82,12 @@ host outside tram's managed file needs --force as well.`,
 		},
 	}
 	f := c.Flags()
-	f.StringVarP(&group, "group", "g", "", "put every imported host under this group")
+	f.StringVarP(&group, "group", "g", "", "put every imported host in this group, replacing the file's own")
+	f.StringVar(&prefix, "group-prefix", "", "keep the file's groups and nest them under this one")
+	f.StringVarP(&set.User, "user", "u", "", "set User on every imported host")
+	f.StringVarP(&set.Key, "key", "k", "", "set IdentityFile on every imported host")
+	f.StringVarP(&set.ProxyJump, "jump", "j", "", "set ProxyJump on every imported host")
+	f.StringVarP(&set.Account, "account", "a", "", "link every imported host to this account")
 	f.StringVar(&format, "from", "", "force the source format instead of detecting it: "+strings.Join(importer.Formats(), ", "))
 	f.BoolVar(&overwrite, "overwrite", false, "update hosts that already exist")
 	f.BoolVar(&flat, "flat-groups", false, "do not nest groups from Ansible children sections")

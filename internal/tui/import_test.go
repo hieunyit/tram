@@ -138,8 +138,13 @@ func TestImportOfAMissingFileStaysInTheForm(t *testing.T) {
 	}
 }
 
-// TestImportUnderAGroup covers the second field of the form.
-func TestImportUnderAGroup(t *testing.T) {
+// TestImportGroupReplacesTheFilesOwn covers the group field, and the bug that
+// made it worth a test of its own.
+//
+// It used to prefix: asking for "imported" produced "imported/prod/webservers".
+// Naming a group is a plain instruction, and inventing a deeper one from the
+// file's sections is not what anyone means by it.
+func TestImportGroupReplacesTheFilesOwn(t *testing.T) {
 	m := newModel(t)
 	send(m, "I")
 	m.form.set(fPath, writeTemp(t, "inventory.ini", inventoryINI))
@@ -151,8 +156,18 @@ func TestImportUnderAGroup(t *testing.T) {
 	if !ok {
 		t.Fatal("imp-web1 was not created")
 	}
-	if h.Group != "imported/prod/webservers" {
-		t.Errorf("group = %q", h.Group)
+	if h.Group != "imported" {
+		t.Errorf("group = %q, want imported exactly", h.Group)
+	}
+
+	// With the field left empty the file's own structure is what survives.
+	m2 := newModel(t)
+	send(m2, "I")
+	m2.form.set(fPath, writeTemp(t, "inventory.ini", inventoryINI))
+	send(m2, "ctrl+s")
+	send(m2, "w")
+	if h, _ := m2.inv.Host("imp-web1"); h.Group != "prod/webservers" {
+		t.Errorf("with no group given the file's own was %q, want prod/webservers", h.Group)
 	}
 }
 
@@ -345,5 +360,39 @@ func TestBrowserShowsWholeFileNames(t *testing.T) {
 	}
 	if !strings.Contains(out, "enter opens a folder") {
 		t.Errorf("the browser does not explain what enter does:\n%s", out)
+	}
+}
+
+// TestImportFormSetsEveryHost covers the fields that fill in what an inventory
+// does not say: a login, a key, a jump station.
+func TestImportFormSetsEveryHost(t *testing.T) {
+	m := newModel(t)
+	send(m, "I")
+	m.form.set(fPath, writeTemp(t, "inventory.ini", inventoryINI))
+	m.form.set(fGroup, "vpb-prod")
+	m.form.set(fUser, "root")
+	m.form.set(fKey, "~/.ssh/id_ed25519")
+	m.form.set(fJump, "bastion")
+	send(m, "ctrl+s")
+	send(m, "w")
+
+	for _, name := range []string{"imp-web1", "imp-web2"} {
+		h, ok := m.inv.Host(name)
+		if !ok {
+			t.Fatalf("%s was not created", name)
+		}
+		// The group replaces the file's own rather than nesting under it.
+		if h.Group != "vpb-prod" {
+			t.Errorf("%s group = %q, want vpb-prod exactly", name, h.Group)
+		}
+		if h.User != "root" {
+			t.Errorf("%s user = %q; the file said deploy and the form said root", name, h.User)
+		}
+		if len(h.IdentityFiles) != 1 || h.IdentityFiles[0] != "~/.ssh/id_ed25519" {
+			t.Errorf("%s keys = %v", name, h.IdentityFiles)
+		}
+		if h.ProxyJump != "bastion" {
+			t.Errorf("%s jump = %q", name, h.ProxyJump)
+		}
 	}
 }

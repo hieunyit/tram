@@ -423,3 +423,70 @@ func TestIdentityHeadingStillMeansAKey(t *testing.T) {
 		t.Errorf("identity was read as an account: %q", r.Account)
 	}
 }
+
+// TestGroupReplacesRatherThanNests is a bug report turned into a test.
+//
+// Asking for group "vpb-prod" put the hosts in "vpb-prod/vpb", because the
+// option prefixed the file's own groups instead of replacing them. Naming a
+// group is a plain instruction and should not invent a deeper one.
+func TestGroupReplacesRatherThanNests(t *testing.T) {
+	src := "[vpb]\nvpb-fs17 ansible_host=10.0.0.17\nvpb-fs18 ansible_host=10.0.0.18\n\n[other]\nx ansible_host=10.0.0.9\n"
+
+	res := parse(t, "hosts", src, Options{Group: "vpb-prod"})
+	for _, r := range res.Records {
+		if r.Group != "vpb-prod" {
+			t.Errorf("%s landed in %q, want vpb-prod exactly", r.Name, r.Group)
+		}
+	}
+
+	// The nesting behaviour is still available, under a name that says so.
+	res = parse(t, "hosts", src, Options{GroupPrefix: "vpb-prod"})
+	if r, _ := byName(res, "vpb-fs17"); r.Group != "vpb-prod/vpb" {
+		t.Errorf("with a prefix the group is %q, want vpb-prod/vpb", r.Group)
+	}
+
+	// Given both, the definite instruction wins.
+	res = parse(t, "hosts", src, Options{Group: "chosen", GroupPrefix: "ignored"})
+	if r, _ := byName(res, "vpb-fs17"); r.Group != "chosen" {
+		t.Errorf("group = %q, the explicit group should win over the prefix", r.Group)
+	}
+}
+
+// TestOverridesApplyToEveryHost covers the other half of the same report: an
+// inventory names machines without saying how to log in to them, and editing
+// that in afterwards one host at a time is not a workflow.
+func TestOverridesApplyToEveryHost(t *testing.T) {
+	src := "[vpb]\na ansible_host=10.0.0.1\nb ansible_host=10.0.0.2 ansible_user=fromfile\n"
+	res := parse(t, "hosts", src, Options{
+		Set: Overrides{User: "root", Key: "~/.ssh/id_ed25519", ProxyJump: "bastion", Account: "ops"},
+	})
+	if len(res.Records) != 2 {
+		t.Fatalf("%d records", len(res.Records))
+	}
+	for _, r := range res.Records {
+		if r.User != "root" {
+			t.Errorf("%s user = %q; the override applies to every host, including one the file gave a user", r.Name, r.User)
+		}
+		if r.Key != "~/.ssh/id_ed25519" || r.ProxyJump != "bastion" || r.Account != "ops" {
+			t.Errorf("%s = %+v", r.Name, r)
+		}
+	}
+
+	// Nothing set means the file still decides.
+	res = parse(t, "hosts", src, Options{})
+	if r, _ := byName(res, "b"); r.User != "fromfile" {
+		t.Errorf("without an override the file's user was lost: %q", r.User)
+	}
+	if r, _ := byName(res, "a"); r.User != "" {
+		t.Errorf("a user appeared from nowhere: %q", r.User)
+	}
+}
+
+func TestOverridesAny(t *testing.T) {
+	if (Overrides{}).Any() {
+		t.Error("empty overrides read as set")
+	}
+	if !(Overrides{User: "root"}).Any() {
+		t.Error("a user override did not read as set")
+	}
+}
