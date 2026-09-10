@@ -32,6 +32,9 @@ type picker struct {
 	onPick  func(string) tea.Cmd
 	filter  string
 	visible []choice
+	// help replaces the default footer, for a picker whose enter does
+	// something other than choose and finish.
+	help string
 }
 
 func (p *picker) refilter() {
@@ -119,13 +122,24 @@ func (p *picker) view(width, height int) string {
 	if len(p.visible) == 0 {
 		b.WriteString(p.st.muted.Render("  nothing matches") + "\n")
 	}
+
+	// Size the label column to what is actually in this list. A fixed width
+	// truncates file names, which is the one thing a file browser must not do.
+	labelW := 12
+	for _, c := range p.visible {
+		if n := len(c.label); n > labelW {
+			labelW = n
+		}
+	}
+	labelW = clamp(labelW, 12, max(20, width-32))
+
 	for i := p.offset; i < end; i++ {
 		c := p.visible[i]
 		marker := "  "
 		if i == p.cursor {
 			marker = p.st.selected.Render(p.gl.arrow[:1]) + " "
 		}
-		label := pad(c.label, 24)
+		label := pad(c.label, labelW)
 		line := marker + label
 		switch {
 		case c.blocked != "":
@@ -138,7 +152,11 @@ func (p *picker) view(width, height int) string {
 		}
 		b.WriteString(line + "\n")
 	}
-	b.WriteString("\n" + p.st.help.Render("  type to filter  enter choose  esc back"))
+	help := "type to filter  enter choose  esc back"
+	if p.help != "" {
+		help = p.help
+	}
+	b.WriteString("\n" + p.st.help.Render("  "+help))
 	return b.String()
 }
 
@@ -146,6 +164,11 @@ func (p *picker) view(width, height int) string {
 
 func (m *Model) openFieldPicker(id fieldID) (tea.Model, tea.Cmd) {
 	switch id {
+	case fPath:
+		m.openFileBrowser(m.form.get(fPath), func(v string) tea.Cmd {
+			m.form.set(fPath, v)
+			return nil
+		})
 	case fAccount:
 		items := []choice{{value: "", label: "(none)", note: "leave User and IdentityFile to the stanza"}}
 		for _, a := range m.inv.Store.AccountList() {

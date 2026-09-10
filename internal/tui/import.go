@@ -21,7 +21,8 @@ func (m *Model) openImportForm() {
 		note:  "Ansible INI, Ansible YAML or a CSV export; nothing is written until you confirm",
 	}
 	f.fields = []*field{
-		{id: fPath, label: "file", input: newInput("", "inventory.ini"), hint: "path to the file to read"},
+		{id: fPath, label: "file", input: newInput("", "press enter to browse"), pick: true,
+			hint: "enter opens the folder; or type a path and press ctrl+s"},
 		{id: fGroup, label: "under", input: newInput("", "keep the file's own groups"), hint: "optional group to file everything under"},
 	}
 	f.focus(0)

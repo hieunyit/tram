@@ -147,8 +147,12 @@ create a stanza that fails.
 
 Nothing is written until you say so. `--dry-run` shows the plan, an existing
 host is left alone unless you pass `--overwrite`, and re-importing the same file
-reports that everything already matches. In the interface, `I` does the same
-thing: type a path, read the preview, press `w` to write it.
+reports that everything already matches.
+
+In the interface, `I` does the same thing. Press enter on the file field to walk
+the folders rather than typing a path from memory: directories open, files are
+chosen, and the ones tram can read are listed first. Then read the preview and
+press `w` to write it.
 
 ## Where things live
 

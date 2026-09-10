@@ -177,3 +177,173 @@ func TestImportOfAnAlreadyPresentHostLeavesItAlone(t *testing.T) {
 		t.Errorf("re-importing would write %d host(s), want 0", got)
 	}
 }
+
+// TestFileBrowserWalksToAFile covers the reason the browser exists: a path
+// typed from memory is the one thing in this form that can be wrong in a way
+// the form cannot report until you submit it.
+func TestFileBrowserWalksToAFile(t *testing.T) {
+	m := newModel(t)
+
+	root := t.TempDir()
+	sub := filepath.Join(root, "inventories")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"hosts", "notes.txt", "servers.csv"} {
+		if err := os.WriteFile(filepath.Join(sub, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	send(m, "I")
+	m.form.set(fPath, root)
+	send(m, "enter") // the file field opens the browser
+
+	if m.mode != modePicker || m.picker == nil {
+		t.Fatal("enter on the file field did not open the browser")
+	}
+	if !strings.Contains(m.picker.title, filepath.Base(root)) {
+		t.Errorf("the browser does not say where it is: %q", m.picker.title)
+	}
+
+	// Walk into the directory.
+	pick(t, m, "inventories/")
+	if m.picker == nil {
+		t.Fatal("choosing a directory closed the browser instead of opening it")
+	}
+
+	labels := pickerLabels(m)
+	for _, want := range []string{"../", "hosts", "notes.txt", "servers.csv"} {
+		if !contains(labels, want) {
+			t.Errorf("the listing is missing %q: %v", want, labels)
+		}
+	}
+	// The files tram can actually read are offered first.
+	if idx(labels, "notes.txt") < idx(labels, "hosts") {
+		t.Errorf("an unreadable file was listed above an inventory: %v", labels)
+	}
+
+	pick(t, m, "hosts")
+	if m.picker != nil {
+		t.Fatal("choosing a file left the browser open")
+	}
+	if m.mode != modeForm {
+		t.Fatalf("choosing a file did not return to the form, mode = %v", m.mode)
+	}
+	if got := m.form.get(fPath); got != filepath.Join(sub, "hosts") {
+		t.Errorf("the field holds %q", got)
+	}
+}
+
+// TestFileBrowserGoesUp checks the parent entry, without which a wrong turn is
+// a dead end.
+func TestFileBrowserGoesUp(t *testing.T) {
+	m := newModel(t)
+	root := t.TempDir()
+	sub := filepath.Join(root, "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	send(m, "I")
+	m.form.set(fPath, sub)
+	send(m, "enter")
+	pick(t, m, "../")
+
+	if m.picker == nil {
+		t.Fatal("going up closed the browser")
+	}
+	if !strings.Contains(m.picker.title, filepath.Base(root)) {
+		t.Errorf("did not go up: %q", m.picker.title)
+	}
+}
+
+// TestFileBrowserStartsSomewhereSensible covers what the field can hold when
+// the browser opens: nothing, a directory, a file, or a path half typed.
+func TestFileBrowserStartsSomewhereSensible(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "hosts")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := expandDir(dir); got != dir {
+		t.Errorf("a directory gave %q", got)
+	}
+	if got := expandDir(file); got != dir {
+		t.Errorf("a file did not give the directory holding it: %q", got)
+	}
+	if got := expandDir(filepath.Join(dir, "half-typed-na")); got != dir {
+		t.Errorf("a half-typed path did not fall back to the deepest real part: %q", got)
+	}
+	if expandDir("") == "" {
+		t.Error("an empty field gave nowhere to start")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if got := expandDir("~"); got != home {
+			t.Errorf("~ gave %q, want %q", got, home)
+		}
+	}
+}
+
+func pick(t *testing.T, m *Model, label string) {
+	t.Helper()
+	p := m.picker
+	if p == nil {
+		t.Fatal("no browser is open")
+	}
+	for i, c := range p.visible {
+		if c.label == label {
+			p.cursor = i
+			send(m, "enter")
+			return
+		}
+	}
+	t.Fatalf("%q is not in the listing: %v", label, pickerLabels(m))
+}
+
+func pickerLabels(m *Model) []string {
+	if m.picker == nil {
+		return nil
+	}
+	out := make([]string, 0, len(m.picker.visible))
+	for _, c := range m.picker.visible {
+		out = append(out, c.label)
+	}
+	return out
+}
+
+func contains(ss []string, want string) bool { return idx(ss, want) >= 0 }
+
+func idx(ss []string, want string) int {
+	for i, s := range ss {
+		if s == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestBrowserShowsWholeFileNames guards the one thing a file browser must not
+// do. The picker used a fixed label column, which is fine for host names and
+// wrong for paths: a truncated file name is unusable for choosing between
+// inventory-2024.ini and inventory-2025.ini.
+func TestBrowserShowsWholeFileNames(t *testing.T) {
+	m := newModel(t)
+	dir := t.TempDir()
+	long := "a-rather-long-inventory-file-name-2025.ini"
+	if err := os.WriteFile(filepath.Join(dir, long), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	send(m, "I")
+	m.form.set(fPath, dir)
+	send(m, "enter")
+
+	out := m.View()
+	if !strings.Contains(out, long) {
+		t.Errorf("the browser truncated the file name:\n%s", out)
+	}
+	if !strings.Contains(out, "enter opens a folder") {
+		t.Errorf("the browser does not explain what enter does:\n%s", out)
+	}
+}
