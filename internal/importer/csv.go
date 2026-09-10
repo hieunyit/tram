@@ -15,13 +15,16 @@ import (
 var csvAliases = map[string]string{
 	"name": "name", "host": "name", "alias": "name", "label": "name", "id": "name",
 	"hostname": "hostname", "address": "hostname", "addr": "hostname", "ip": "hostname",
-	"ip_address": "hostname", "ipaddress": "hostname", "fqdn": "hostname", "server": "hostname",
+	"ip_address": "hostname", "ipaddress": "hostname", "fqdn": "hostname",
+	"server": "hostname", "host_name": "hostname",
 	"user": "user", "username": "user", "login": "user", "ssh_user": "user",
 	"port": "port", "ssh_port": "port",
-	"key": "key", "keyfile": "key", "key_file": "key", "identity": "key",
+	"key": "key", "keyfile": "key", "key_file": "key", "ssh_key": "key", "identity": "key",
 	"identityfile": "key", "identity_file": "key", "private_key": "key", "pem": "key",
 	"jump": "jump", "proxyjump": "jump", "proxy_jump": "jump", "bastion": "jump", "via": "jump",
-	"group": "group", "groups": "group", "environment": "group", "env": "group", "tag": "group",
+	"group": "group", "groups": "group", "environment": "group", "env": "group",
+	"tag": "group", "folder": "group",
+	"account": "account", "acc": "account",
 	"desc": "desc", "description": "desc", "comment": "desc", "note": "desc", "notes": "desc",
 }
 
@@ -89,7 +92,9 @@ func parseCSV(data []byte, opt Options) (*Result, error) {
 			case "jump":
 				rec.ProxyJump = cell
 			case "group":
-				rec.Group = strings.Trim(strings.ReplaceAll(cell, "\\", "/"), "/")
+				rec.Group = NormaliseGroup(strings.ReplaceAll(cell, "\\", "/"))
+			case "account":
+				rec.Account = cell
 			case "desc":
 				rec.Desc = cell
 			}

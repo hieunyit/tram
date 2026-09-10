@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -515,5 +516,114 @@ func TestClearingAMarkerStillWorks(t *testing.T) {
 	}
 	if h.Desc != "Primary web server" {
 		t.Errorf("clearing the group took the description: %q", h.Desc)
+	}
+}
+
+// TestEditingOneLegacyHostKeepsTheOthers is a data-loss check.
+//
+// Migrating the old markers rewrites the comment run above a Host line, which
+// shifts every line index after it. The block being edited is re-found, and if
+// that ever failed the next write would splice a stale range and take a
+// neighbouring stanza with it. A configuration where every host carries the old
+// markers is exactly the shape that would expose it.
+func TestEditingOneLegacyHostKeepsTheOthers(t *testing.T) {
+	src := `#sshfleet:group=giavang/web
+#sshfleet:desc=first
+Host h1
+    HostName 1.1.1.1
+    User a
+
+#sshfleet:group=giavang/db
+#sshfleet:desc=second
+Host h2
+    HostName 2.2.2.2
+    User b
+
+#sshfleet:group=other
+#sshfleet:desc=third
+Host h3
+    HostName 3.3.3.3
+    ProxyJump h1
+`
+	inv := setup(t, src)
+	apply := applier(t)
+
+	before := model.Names(inv.Hosts())
+	if len(before) != 3 {
+		t.Fatalf("read %v, want three hosts", before)
+	}
+
+	// Edit the middle one, the worst case for an index shift in either
+	// direction.
+	apply(inv.Edit("h2", Spec{Name: "h2", Group: Str("giavang/db2")}, false))
+
+	after := model.Names(inv.Hosts())
+	if len(after) != 3 {
+		t.Fatalf("after editing h2 the file holds %v; a host was lost\n%s", after, read(t, inv))
+	}
+	for _, name := range []string{"h1", "h2", "h3"} {
+		h, ok := inv.Host(name)
+		if !ok {
+			t.Fatalf("%s vanished:\n%s", name, read(t, inv))
+		}
+		switch name {
+		case "h1":
+			if h.HostName != "1.1.1.1" || h.User != "a" || h.Group != "giavang/web" || h.Desc != "first" {
+				t.Errorf("h1 was damaged: %+v", h)
+			}
+		case "h2":
+			if h.HostName != "2.2.2.2" || h.User != "b" || h.Group != "giavang/db2" || h.Desc != "second" {
+				t.Errorf("h2 is wrong: %+v", h)
+			}
+		case "h3":
+			if h.HostName != "3.3.3.3" || h.ProxyJump != "h1" || h.Group != "other" || h.Desc != "third" {
+				t.Errorf("h3 was damaged: %+v", h)
+			}
+		}
+	}
+}
+
+// TestEditingEveryLegacyHostInTurn walks the whole file, which is what actually
+// happens to a real configuration over a few days of use.
+func TestEditingEveryLegacyHostInTurn(t *testing.T) {
+	var src strings.Builder
+	for i := 1; i <= 6; i++ {
+		fmt.Fprintf(&src, "#sshfleet:group=g%d\n#sshfleet:desc=host %d\nHost h%d\n    HostName 10.0.0.%d\n\n", i, i, i, i)
+	}
+	inv := setup(t, src.String())
+	apply := applier(t)
+
+	for i := 1; i <= 6; i++ {
+		name := fmt.Sprintf("h%d", i)
+		apply(inv.Edit(name, Spec{Name: name, Port: Str(fmt.Sprint(2200 + i))}, false))
+		if got := len(inv.Hosts()); got != 6 {
+			t.Fatalf("after editing %s the file holds %d hosts:\n%s", name, got, read(t, inv))
+		}
+	}
+	for i := 1; i <= 6; i++ {
+		h, ok := inv.Host(fmt.Sprintf("h%d", i))
+		if !ok {
+			t.Fatalf("h%d vanished:\n%s", i, read(t, inv))
+		}
+		if h.HostName != fmt.Sprintf("10.0.0.%d", i) || h.Group != fmt.Sprintf("g%d", i) {
+			t.Errorf("h%d is wrong: %+v", i, h)
+		}
+	}
+}
+
+// TestGroupIsTidiedOnWrite checks that a group typed with stray spaces lands in
+// the file as one path, so filtering and the tree see a single group rather
+// than two that differ only by whitespace.
+func TestGroupIsTidiedOnWrite(t *testing.T) {
+	inv := setup(t, fixture)
+	apply := applier(t)
+	apply(inv.Edit("web1", Spec{Name: "web1", Group: Str(" prod / web / ")}, false))
+
+	h, _ := inv.Host("web1")
+	if h.Group != "prod/web" {
+		t.Errorf("group = %q, want prod/web", h.Group)
+	}
+	if got := model.Names(inv.Select(Filter{Group: "prod"})); len(got) != 3 {
+		t.Errorf("the tidied group did not filter with the others: %v", got)
 	}
 }

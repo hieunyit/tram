@@ -336,3 +336,90 @@ func TestBadHostNamesAreRejectedNotEscaped(t *testing.T) {
 		t.Error("the rejection was not reported")
 	}
 }
+
+// TestAnsibleProxyJumpVariable covers the spelling that names a jump station
+// directly, which is clearer than hiding it in raw ssh arguments and so wins
+// over them.
+func TestAnsibleProxyJumpVariable(t *testing.T) {
+	src := "[web]\n" +
+		"a ansible_proxy_jump=bastion\n" +
+		"b ansible_ssh_proxy_jump=other\n" +
+		"c ansible_ssh_common_args='-J fromargs'\n" +
+		"d ansible_proxy_jump=wins ansible_ssh_common_args='-J loses'\n"
+	res := parse(t, "hosts", src, Options{})
+	for name, want := range map[string]string{"a": "bastion", "b": "other", "c": "fromargs", "d": "wins"} {
+		r, ok := byName(res, name)
+		if !ok {
+			t.Errorf("%s missing", name)
+			continue
+		}
+		if r.ProxyJump != want {
+			t.Errorf("%s jump = %q, want %q", name, r.ProxyJump, want)
+		}
+	}
+}
+
+// TestGroupNormalisation checks that a group written with stray spaces is the
+// same group as one written without, rather than a second one that merely looks
+// alike in a listing.
+func TestGroupNormalisation(t *testing.T) {
+	cases := map[string]string{
+		" giavang / web-chat / ": "giavang/web-chat",
+		"giavang//web":           "giavang/web",
+		"  ":                     "",
+		"prod":                   "prod",
+	}
+	for in, want := range cases {
+		if got := NormaliseGroup(in); got != want {
+			t.Errorf("NormaliseGroup(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	res := parse(t, "s.csv", "name,ip,group\nweb1,1.1.1.1, prod / web \n", Options{})
+	if r, _ := byName(res, "web1"); r.Group != "prod/web" {
+		t.Errorf("group = %q", r.Group)
+	}
+	// A prefix joins cleanly rather than doubling the separator.
+	res = parse(t, "s.csv", "name,ip,group\nweb1,1.1.1.1,/prod/\n", Options{GroupPrefix: "imported/"})
+	if r, _ := byName(res, "web1"); r.Group != "imported/prod" {
+		t.Errorf("prefixed group = %q", r.Group)
+	}
+}
+
+// TestCSVAccountAndExtraHeadings covers the column names a spreadsheet from the
+// older tool uses.
+func TestCSVAccountAndExtraHeadings(t *testing.T) {
+	src := "Name,Host Name,Folder,Account,SSH Key\n" +
+		"web1,10.0.0.1,prod/web,deploy,~/.ssh/id_ed25519\n"
+	res := parse(t, "s.csv", src, Options{})
+	r, ok := byName(res, "web1")
+	if !ok {
+		t.Fatalf("web1 missing from %v", names(res))
+	}
+	if r.HostName != "10.0.0.1" {
+		t.Errorf("hostname = %q; the host_name heading was not read", r.HostName)
+	}
+	if r.Group != "prod/web" {
+		t.Errorf("group = %q; the folder heading was not read", r.Group)
+	}
+	if r.Account != "deploy" {
+		t.Errorf("account = %q", r.Account)
+	}
+	if r.Key != "~/.ssh/id_ed25519" {
+		t.Errorf("key = %q; the ssh_key heading was not read", r.Key)
+	}
+}
+
+// TestIdentityHeadingStillMeansAKey guards a heading whose meaning is easy to
+// get wrong: in the tool people are migrating from, "identity" is the key file,
+// not an account.
+func TestIdentityHeadingStillMeansAKey(t *testing.T) {
+	res := parse(t, "s.csv", "name,ip,identity\nweb1,1.1.1.1,~/.ssh/id_rsa\n", Options{})
+	r, _ := byName(res, "web1")
+	if r.Key != "~/.ssh/id_rsa" {
+		t.Errorf("key = %q", r.Key)
+	}
+	if r.Account != "" {
+		t.Errorf("identity was read as an account: %q", r.Account)
+	}
+}

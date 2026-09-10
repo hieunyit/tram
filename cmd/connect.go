@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/launcher"
@@ -67,10 +68,15 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 		return nil
 	}
 
+	if opt.Timeout == 0 {
+		opt.Timeout = inv.Store.Options.ConnectTimeout
+	}
 	req := buildRequest(a, h.Name, remote, opt)
 	req.ForceTTY = req.ForceTTY && isTerminal(os.Stdin)
 
 	req.Askpass = askpassFor(a, inv, h)
+
+	announce(inv.Chain(h.Name), h)
 
 	_ = inv.Store.Touch(h.Name)
 	res := launcher.Handoff(req.Argv(), req.Env())
@@ -85,6 +91,41 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 		return ExitCode{Code: res.ExitCode, Err: fmt.Errorf("ssh could not open the session to %s", h.Name)}
 	}
 	return ExitCode{Code: res.ExitCode}
+}
+
+// announce says what is being dialled, on one line, before ssh takes the
+// terminal.
+//
+// ssh sets no connect timeout of its own and prints nothing while it waits, so
+// a jump station that does not answer looks exactly like a hung program: a
+// blank screen for minutes with no clue which machine is not replying. One line
+// naming the route turns that into something a person can act on, and it
+// scrolls away the moment the session opens.
+func announce(chain model.JumpChain, h model.Host) {
+	if !isTerminal(os.Stderr) {
+		return
+	}
+	for _, line := range routeLines(chain, h.Name) {
+		fmt.Fprintln(os.Stderr, line)
+	}
+}
+
+// routeLines builds what announce prints. A route through stations gets a
+// second line, because that is the case where a silent wait has somewhere to
+// look, and the first line alone would not say where.
+func routeLines(chain model.JumpChain, name string) []string {
+	if len(chain.Hops) == 0 {
+		return []string{"connecting: " + name}
+	}
+	parts := make([]string, 0, len(chain.Hops)+1)
+	for _, hop := range chain.Hops {
+		parts = append(parts, hop.Spec)
+	}
+	parts = append(parts, name)
+	return []string{
+		"connecting: " + strings.Join(parts, " -> "),
+		"  waiting here means a station is not answering; ctrl+c, then `tram doctor " + name + "`",
+	}
 }
 
 // askpassFor decides whether ssh should route its questions through tram.

@@ -41,6 +41,9 @@ type Record struct {
 	ProxyJump string `json:"proxy_jump"`
 	Group     string `json:"group"`
 	Desc      string `json:"desc"`
+	// Account links the host to an identity when the source names one. Only a
+	// CSV export carries this; an Ansible inventory has no such idea.
+	Account string `json:"account"`
 
 	// Groups are every group the source put this host in. tram keeps one, and
 	// this is here so the command can say which ones it dropped.
@@ -100,15 +103,17 @@ func Parse(path string, opt Options) (*Result, error) {
 	}
 	res.Format, res.Path = f, path
 
-	if opt.GroupPrefix != "" {
-		prefix := strings.Trim(opt.GroupPrefix, "/")
-		for i := range res.Records {
-			if res.Records[i].Group == "" {
-				res.Records[i].Group = prefix
-				continue
-			}
-			res.Records[i].Group = prefix + "/" + res.Records[i].Group
+	prefix := NormaliseGroup(opt.GroupPrefix)
+	for i := range res.Records {
+		g := NormaliseGroup(res.Records[i].Group)
+		switch {
+		case prefix == "":
+		case g == "":
+			g = prefix
+		default:
+			g = prefix + "/" + g
 		}
+		res.Records[i].Group = g
 	}
 	return res, nil
 }
@@ -168,8 +173,12 @@ func ansibleVar(r *Record, key, value string) bool {
 		r.Port = value
 	case "ansible_ssh_private_key_file", "ansible_private_key_file":
 		r.Key = value
+	case "ansible_proxy_jump", "ansible_ssh_proxy_jump":
+		// Some inventories name the station directly rather than hiding it in
+		// raw ssh arguments. It is the clearer spelling, so it wins.
+		r.ProxyJump = value
 	case "ansible_ssh_common_args", "ansible_ssh_extra_args":
-		if j := jumpFromArgs(value); j != "" {
+		if j := jumpFromArgs(value); j != "" && r.ProxyJump == "" {
 			r.ProxyJump = j
 		}
 	default:
@@ -237,4 +246,18 @@ func unreachable(vars map[string]string) (string, bool) {
 // because ssh would read them as something other than one machine.
 func validName(n string) bool {
 	return n != "" && !strings.ContainsAny(n, " \t\"'#*?!")
+}
+
+// NormaliseGroup tidies a group path: whitespace around each level is dropped
+// and empty levels disappear, so "giavang / web-chat /" and "giavang/web-chat"
+// are the same group rather than two that merely look alike.
+func NormaliseGroup(g string) string {
+	parts := strings.Split(g, "/")
+	out := parts[:0]
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, "/")
 }

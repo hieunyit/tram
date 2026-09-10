@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hieuny/tram/internal/importer"
 	"github.com/hieuny/tram/internal/model"
 	"github.com/hieuny/tram/internal/sshconf"
 	"github.com/hieuny/tram/internal/store"
@@ -361,7 +362,9 @@ func applyMarkers(b *sshconf.Block, s Spec) {
 
 	group, desc := curGroup, curDesc
 	if s.Group != nil {
-		group = *s.Group
+		// Tidied on the way in, so that "prod / web" and "prod/web" are the same
+		// group rather than two that only look alike in a listing.
+		group = importer.NormaliseGroup(*s.Group)
 	}
 	if s.Desc != nil {
 		desc = *s.Desc

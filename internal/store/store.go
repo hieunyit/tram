@@ -68,6 +68,11 @@ type Options struct {
 	ASCII bool `toml:"ascii"`
 	// ConfirmMulti asks before running a command on more than one host.
 	ConfirmMulti bool `toml:"confirm_multi"`
+	// ConnectTimeout bounds how long ssh waits for each hop of an interactive
+	// connection, in seconds. Zero leaves ssh's own behaviour, which is to wait
+	// for the operating system's TCP timeout: minutes, in silence. Setting it
+	// is how a dead jump station becomes an error instead of a hang.
+	ConnectTimeout int `toml:"connect_timeout"`
 	// ReusePassphrase lets tram hold a key passphrase for the rest of the run,
 	// so the other hosts sharing that key file do not ask again. It is never
 	// written anywhere and is gone when tram exits. Set it to false to leave

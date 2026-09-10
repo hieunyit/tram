@@ -130,6 +130,7 @@ func diffRecord(cur model.Host, rec importer.Record) []string {
 	cmp("jump", cur.ProxyJump, rec.ProxyJump)
 	cmp("group", cur.Group, rec.Group)
 	cmp("desc", cur.Desc, rec.Desc)
+	cmp("account", cur.Account, rec.Account)
 	if rec.Key != "" {
 		has := false
 		for _, k := range cur.IdentityFiles {
@@ -206,6 +207,9 @@ func specFrom(rec importer.Record) Spec {
 	}
 	if rec.Key != "" {
 		s.SetIdentityFiles([]string{rec.Key})
+	}
+	if rec.Account != "" {
+		s.Account = Str(rec.Account)
 	}
 	return s
 }
