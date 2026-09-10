@@ -462,3 +462,39 @@ func TestPassphraseFoundWhateverTheKeyPathLooksLike(t *testing.T) {
 		t.Errorf("served %q", got)
 	}
 }
+
+// TestAskpassInvocationIsRecognisedWithoutTramsOwnEnvironment covers the case
+// where SSH_ASKPASS points at tram but tram did not start the ssh.
+//
+// Without this, the prompt falls through to the command line and is read as a
+// host name, and tram tries to open a session to "Enter passphrase for ...".
+// It is worth supporting because pointing SSH_ASKPASS at tram permanently is a
+// reasonable thing to do: every ssh then benefits, not only the ones tram ran.
+func TestAskpassInvocationIsRecognisedWithoutTramsOwnEnvironment(t *testing.T) {
+	os.Unsetenv(EnvToken)
+	os.Unsetenv(EnvLearn)
+
+	prompts := []string{
+		`Enter passphrase for C:\Users\me\.ssh\id_ed25519: `,
+		"Enter passphrase for key '/home/me/.ssh/id_rsa': ",
+		"deploy@web1's password: ",
+		"root@10.0.0.1's password: ",
+		"The authenticity of host 'web1 (10.0.0.1)' can't be established. Are you sure you want to continue connecting (yes/no)? ",
+	}
+	for _, p := range prompts {
+		if !IsAskpassInvocation([]string{p}) {
+			t.Errorf("not recognised as a prompt: %q", p)
+		}
+	}
+
+	// Ordinary command lines must not be mistaken for prompts.
+	commands := [][]string{
+		{"ls"}, {"web1"}, {"ls", "--wide"}, {"import", "inventory.ini"},
+		{"add", "web2", "--addr", "10.0.0.2"}, {}, {"my-host.example.com"},
+	}
+	for _, c := range commands {
+		if IsAskpassInvocation(c) {
+			t.Errorf("%v was mistaken for an askpass prompt", c)
+		}
+	}
+}

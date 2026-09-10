@@ -22,7 +22,7 @@ func main() {
 	// command line the user typed, so it is handled before cobra sees it: the
 	// helper writes one secret to standard output and exits, and answers
 	// nothing else.
-	if secret.IsAskpassInvocation() {
+	if secret.IsAskpassInvocation(os.Args[1:]) {
 		os.Exit(runAskpass())
 	}
 

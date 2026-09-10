@@ -100,8 +100,9 @@ account. And a host linked to an account remembers the password under that
 account, so the next host sharing the identity does not ask at all.
 
 The keyring is the operating system's, so it is shared by every tram process on
-the machine. Another tab, another window, a week later: the same host does not
-ask again.
+the machine. Another tab, another window, after a reboot: the same host does not
+ask again. On Windows the credential is written to persist for this and every
+later logon session, which is what makes that true across a restart.
 
 `tram secret ls` shows what is stored and where, never the values.
 `tram secret rm <host>` forgets one. Setting `remember_secrets = false` in
@@ -124,6 +125,10 @@ thing.
 which then answers for it and leaves tram out of the loop entirely. On Windows
 the agent is a service that survives reboots, so a key added once stays added.
 Use `-t 8h` if you would rather it expired.
+
+tram also works as a general askpass helper, whether or not it started the ssh.
+Point `SSH_ASKPASS` at the binary and set `SSH_ASKPASS_REQUIRE=force`, and every
+ssh on the machine is answered from the same keyring.
 
 If you own the far end, a key installed with `tram key push` is still a better
 answer than a remembered password.

@@ -29,8 +29,34 @@ const (
 
 // IsAskpassInvocation reports whether this process was started by ssh asking a
 // question rather than by a user running a command.
-func IsAskpassInvocation() bool {
-	return os.Getenv(EnvToken) != "" || os.Getenv(EnvLearn) != ""
+//
+// The environment tram itself sets is the first signal, but it cannot be the
+// only one. ssh runs whatever SSH_ASKPASS names, and a person may well point
+// that at tram permanently so that every ssh benefits, not only the ones tram
+// started. Without the second check such an invocation falls through to the
+// command line, where a prompt like "Enter passphrase for ...: " is read as a
+// host name and tram tries to connect to it.
+//
+// The shape is unmistakable: exactly one argument, and it reads as a question.
+// No host name contains spaces or ends in a colon.
+func IsAskpassInvocation(args []string) bool {
+	if os.Getenv(EnvToken) != "" || os.Getenv(EnvLearn) != "" {
+		return true
+	}
+	return len(args) == 1 && LooksLikePrompt(args[0])
+}
+
+// LooksLikePrompt reports whether a string is one of the questions ssh asks
+// through an askpass helper.
+func LooksLikePrompt(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || !strings.ContainsAny(s, " \t") {
+		return false
+	}
+	return passphrasePrompt.MatchString(s) ||
+		passwordPrompt.MatchString(s) ||
+		strings.Contains(strings.ToLower(s), "password") ||
+		hostKeyPrompt.MatchString(s)
 }
 
 var (
