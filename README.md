@@ -91,11 +91,17 @@ The first time a host asks for a password, tram asks for it on the console,
 hands it to ssh, and keeps it if the session opens. After that it answers the
 prompt itself and you are not asked again.
 
-Two details make this safe to leave switched on. The answer is parked under a
+Three details make this safe to leave switched on. The answer is parked under a
 one-off identifier while the session runs and only written to the keyring once
-the connection has actually succeeded, so a typo is never remembered. And the
-host named in ssh's own prompt decides which secret is served, so a jump
-station gets its own password rather than the destination's.
+the connection has actually succeeded, so a typo is never remembered. The host
+named in ssh's own prompt decides which secret is served, so a jump station gets
+its own password rather than the destination's, and is asked for once on its own
+account. And a host linked to an account remembers the password under that
+account, so the next host sharing the identity does not ask at all.
+
+The keyring is the operating system's, so it is shared by every tram process on
+the machine. Another tab, another window, a week later: the same host does not
+ask again.
 
 `tram secret ls` shows what is stored and where, never the values.
 `tram secret rm <host>` forgets one. Setting `remember_secrets = false` in

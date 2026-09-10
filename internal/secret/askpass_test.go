@@ -338,3 +338,83 @@ func TestPassphraseServedForAWindowsPath(t *testing.T) {
 		t.Errorf("served %q", got)
 	}
 }
+
+// TestLearnedPasswordGoesToTheAccount covers the rule the plan states and the
+// question it answers: open a second host that shares an identity and you are
+// not asked again.
+//
+// A password authenticates a login, not an address. Remembering it per host
+// would mean typing the same password once for every machine in a fleet, which
+// is most of the way back to typing it every time.
+func TestLearnedPasswordGoesToTheAccount(t *testing.T) {
+	accountSubject := PasswordFor("account", "deploy")
+	t.Setenv(EnvToken, string(accountSubject))
+	t.Setenv(EnvHost, "web1")
+
+	// The prompt names the destination, so the session's identity is used.
+	if got := learnSubject("deploy@web1's password: "); got != accountSubject {
+		t.Errorf("the destination's password would be remembered as %q, want the account", got)
+	}
+
+	// A prompt for something else on the way is that machine's own password.
+	if got := learnSubject("jump@bastion's password: "); got != PasswordFor("host", "bastion") {
+		t.Errorf("a jump station's password would be remembered as %q", got)
+	}
+
+	// With no account, the host itself is the only thing to key on.
+	hostSubject := PasswordFor("host", "web1")
+	t.Setenv(EnvToken, string(hostSubject))
+	if got := learnSubject("deploy@web1's password: "); got != hostSubject {
+		t.Errorf("an unlinked host would be remembered as %q", got)
+	}
+}
+
+// TestAccountPasswordIsNotGivenToAMachineOnTheWay draws the line the serving
+// side has to hold.
+//
+// One stored account password answers for the host the session was opened for,
+// because that is the identity it belongs to. It is not handed to a jump
+// station that happens to ask along the way: ssh prints the name in the prompt
+// precisely so a person can decide, and answering silently for a different
+// machine takes that decision away.
+func TestAccountPasswordIsNotGivenToAMachineOnTheWay(t *testing.T) {
+	st := New(t.TempDir())
+	sub := PasswordFor("account", "deploy")
+	if err := st.Set(sub, "fleet-wide"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Delete(sub) })
+	t.Setenv(EnvToken, string(sub))
+	t.Setenv(EnvHost, "web7")
+
+	var sb strings.Builder
+	if err := Askpass(st, "deploy@web7's password: ", &sb); err != nil {
+		t.Fatalf("the destination was not answered: %v", err)
+	}
+	if got := strings.TrimSpace(sb.String()); got != "fleet-wide" {
+		t.Errorf("the destination was served %q", got)
+	}
+
+	sb.Reset()
+	if err := Askpass(st, "root@bastion's password: ", &sb); err == nil {
+		t.Errorf("a jump station was served the destination's password: %q", sb.String())
+	}
+	if sb.Len() != 0 {
+		t.Errorf("wrote %q to ssh for a machine on the way", sb.String())
+	}
+
+	// A station with its own password still gets served, and is asked for only
+	// once because it is remembered under its own name.
+	bastion := PasswordFor("host", "bastion")
+	if err := st.Set(bastion, "bastion-only"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Delete(bastion) })
+	sb.Reset()
+	if err := Askpass(st, "root@bastion's password: ", &sb); err != nil {
+		t.Fatalf("a station with its own password was not answered: %v", err)
+	}
+	if got := strings.TrimSpace(sb.String()); got != "bastion-only" {
+		t.Errorf("the station was served %q", got)
+	}
+}

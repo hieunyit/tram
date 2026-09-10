@@ -57,6 +57,9 @@ type AskpassSetup struct {
 	// have and park the answer under this nonce. It is an identifier, not a
 	// secret, and means nothing to anyone who reads it.
 	Learn string
+	// Host names the destination, so the helper can tell a prompt about it
+	// from one about a jump station along the way.
+	Host string
 }
 
 // Argv builds the ssh command line for a request.
@@ -91,6 +94,9 @@ func (r Request) Env() []string {
 	env = setEnv(env, "TRAM_ASKPASS_TOKEN", r.Askpass.Token)
 	if r.Askpass.Learn != "" {
 		env = setEnv(env, "TRAM_ASKPASS_LEARN", r.Askpass.Learn)
+	}
+	if r.Askpass.Host != "" {
+		env = setEnv(env, "TRAM_ASKPASS_HOST", r.Askpass.Host)
 	}
 	if r.Askpass.Force {
 		// Without this ssh prefers to prompt on the terminal it already has,

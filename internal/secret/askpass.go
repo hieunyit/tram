@@ -21,6 +21,10 @@ const (
 	// EnvLearn switches the helper into learn mode and carries the nonce the
 	// captured secret is parked under until the session proves it was right.
 	EnvLearn = "TRAM_ASKPASS_LEARN"
+	// EnvHost names the host the session was opened for, which is how the
+	// helper tells a prompt about the destination from one about a jump
+	// station it passes through on the way.
+	EnvHost = "TRAM_ASKPASS_HOST"
 )
 
 // IsAskpassInvocation reports whether this process was started by ssh asking a
@@ -92,24 +96,66 @@ func Askpass(st *Store, prompt string, out io.Writer) error {
 	if learn == "" {
 		return fmt.Errorf("no password stored for %s", strings.TrimSpace(prompt))
 	}
-	subs := passwordSubjects(prompt)
-	return capture(st, out, learn, subs[0], strings.TrimRight(prompt, " ")+" ")
+	return capture(st, out, learn, learnSubject(prompt), strings.TrimRight(prompt, " ")+" ")
+}
+
+// learnSubject decides what a newly typed password should be remembered as.
+//
+// For the destination it is whatever the session was armed with, which is the
+// account when the host is linked to one. That is the difference between
+// typing a password once for a fleet and typing it once per machine: a
+// password authenticates an identity, not an address. For any other host in
+// the prompt, meaning a jump station, it is that station's own subject.
+func learnSubject(prompt string) Subject {
+	host := promptHost(prompt)
+	dest := os.Getenv(EnvHost)
+	token := Subject(os.Getenv(EnvToken))
+
+	if host == "" || (dest != "" && strings.EqualFold(host, dest)) {
+		if token != "" {
+			return token
+		}
+	}
+	if host != "" {
+		return PasswordFor("host", host)
+	}
+	if token != "" {
+		return token
+	}
+	return PasswordFor("host", "unknown")
+}
+
+// promptHost reads the host name out of a password prompt, or "" when the
+// wording does not carry one.
+func promptHost(prompt string) string {
+	if m := passwordPrompt.FindStringSubmatch(strings.TrimSpace(prompt)); m != nil {
+		return m[2]
+	}
+	return ""
 }
 
 // passwordSubjects lists the subjects that could answer a password prompt, best
 // guess first.
 //
-// The host named in the prompt comes first, because ssh asks for the jump
-// station's password with the station's own name in it. Falling back to the
-// session's token without looking would hand the destination's password to a
-// bastion, which is both wrong and a way to leak one machine's password to
-// another.
+// The host named in the prompt comes first, because ssh asks for a jump
+// station's password with the station's own name in it. The session's own
+// identity is only offered when the prompt is about the destination, or when
+// the prompt names nobody. Handing it to a machine on the way would give one
+// host's password to another, silently, and the whole reason ssh prints the
+// name in the prompt is so a person can decide that for themselves.
+//
+// The station is not left stuck: it gets asked for once, on its own account,
+// and remembered under its own name.
 func passwordSubjects(prompt string) []Subject {
 	var out []Subject
-	if m := passwordPrompt.FindStringSubmatch(strings.TrimSpace(prompt)); m != nil && m[2] != "" {
-		out = append(out, PasswordFor("host", m[2]))
+	host := promptHost(prompt)
+	if host != "" {
+		out = append(out, PasswordFor("host", host))
 	}
-	if tok := os.Getenv(EnvToken); tok != "" {
+
+	dest := os.Getenv(EnvHost)
+	forDestination := host == "" || dest == "" || strings.EqualFold(host, dest)
+	if tok := os.Getenv(EnvToken); tok != "" && forDestination {
 		s := Subject(tok)
 		if len(out) == 0 || out[0] != s {
 			out = append(out, s)

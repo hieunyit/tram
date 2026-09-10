@@ -133,6 +133,7 @@ func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host
 			Enabled: true,
 			Binary:  launcher.SelfPath(),
 			Token:   string(sub),
+			Host:    h.Name,
 			Force:   force,
 		}
 	}
@@ -150,10 +151,18 @@ func askpassFor(a *App, inv *inventory.Inventory, st *secret.Store, h model.Host
 	case !secret.TTYAvailable():
 		return launcher.AskpassSetup{}
 	}
+
+	// A host linked to an account learns the password under that account, so
+	// the next host sharing the identity does not ask again. A password
+	// authenticates a login, not an address.
+	if h.Account != "" {
+		sub = secret.PasswordFor("account", h.Account)
+	}
 	return launcher.AskpassSetup{
 		Enabled: true,
 		Binary:  launcher.SelfPath(),
 		Token:   string(sub),
+		Host:    h.Name,
 		Force:   true,
 		Learn:   secret.NewNonce(),
 	}
