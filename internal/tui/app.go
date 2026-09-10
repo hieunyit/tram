@@ -228,6 +228,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateList(msg)
 	}
+	return m.forwardToFocused(msg)
+}
+
+// forwardToFocused hands a message the interface does not know about to
+// whatever is currently taking typing.
+//
+// The text input turns ctrl+v into a command that reads the clipboard, and that
+// command's answer comes back as a message of the widget's own. Handling only
+// key events meant the answer was dropped on the floor and the paste silently
+// did nothing. It is also what makes the cursor blink.
+func (m *Model) forwardToFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch {
+	case m.mode == modeForm && m.form != nil:
+		f := m.form
+		if f.cursor < 0 || f.cursor >= len(f.fields) {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		f.fields[f.cursor].input, cmd = f.fields[f.cursor].input.Update(msg)
+		return m, cmd
+	case m.mode == modeSearch:
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		m.searchQuery = m.search.Value()
+		m.applyFilter()
+		return m, cmd
+	}
 	return m, nil
 }
 

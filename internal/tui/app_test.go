@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/model"
@@ -66,17 +67,29 @@ func key(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
+// send delivers keys and drains the commands they produce.
+//
+// The draining is bounded on purpose. A focused text input schedules a cursor
+// blink, whose message schedules the next one, so following the chain to its
+// end never ends. A handful of rounds is enough to settle everything the tests
+// care about.
 func send(m *Model, keys ...string) {
 	for _, k := range keys {
-		mm, cmd := m.Update(key(k))
-		_ = mm
-		for cmd != nil {
-			msg := cmd()
-			if msg == nil {
-				break
-			}
-			_, cmd = m.Update(msg)
+		_, cmd := m.Update(key(k))
+		drain(m, cmd)
+	}
+}
+
+func drain(m *Model, cmd tea.Cmd) {
+	for i := 0; cmd != nil && i < 8; i++ {
+		msg := cmd()
+		if msg == nil {
+			return
 		}
+		if _, ok := msg.(cursor.BlinkMsg); ok {
+			return
+		}
+		_, cmd = m.Update(msg)
 	}
 }
 

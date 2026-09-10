@@ -94,8 +94,10 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, p.onPick(c.value)
 	default:
-		if s := msg.String(); len(s) == 1 {
-			p.filter += s
+		// Anything that carries text adds to the filter, one keystroke or a
+		// whole pasted word. Counting characters would drop the paste.
+		if len(msg.Runes) > 0 {
+			p.filter += string(msg.Runes)
 			p.refilter()
 		}
 	}

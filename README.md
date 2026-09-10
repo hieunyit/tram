@@ -215,6 +215,10 @@ opens the folder, the same as the import screen's.
 to whichever host is selected. An import preview uses the same screen, where
 `w` writes the hosts and `esc` throws the plan away.
 
+Pasting works in every box that takes typing: with the mouse, however your
+terminal does it, and with ctrl+v. Selecting and copying is the terminal's own,
+because tram never captures the mouse and so never takes selection away from it.
+
 The interface draws tram's own data and nothing else. It never renders the
 contents of a session. `enter` exits the interface, gives the terminal to ssh,
 and starts the interface again when ssh is done.
