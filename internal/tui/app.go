@@ -85,6 +85,9 @@ type Model struct {
 
 	form   *form
 	picker *picker
+	// formStack holds the forms a form was opened from, so that making an
+	// account in the middle of adding a host returns to the host.
+	formStack []*form
 
 	confirmText string
 	confirmFn   func() tea.Cmd

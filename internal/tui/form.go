@@ -19,6 +19,7 @@ const (
 	formBatch
 	formExec
 	formImport
+	formAccount
 )
 
 // fieldID names a form field so the code reads as something other than indexes.
@@ -36,6 +37,7 @@ const (
 	fAccount fieldID = "account"
 	fCommand fieldID = "command"
 	fPath    fieldID = "path"
+	fAuth    fieldID = "auth"
 )
 
 type field struct {
@@ -63,6 +65,9 @@ type form struct {
 	origin  model.Host   // edit and clone
 	note    string
 	problem string
+	// after is called with what this form produced, for a form opened from
+	// inside another one.
+	after func(string) tea.Cmd
 }
 
 func newInput(value, placeholder string) textinput.Model {
@@ -202,6 +207,11 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := m.form
 	switch msg.String() {
 	case "esc":
+		// A form opened from inside another goes back to it, rather than
+		// throwing away the half-filled one underneath.
+		if m.popForm() {
+			return m, nil
+		}
 		m.mode = modeNormal
 		m.form = nil
 		return m, nil
@@ -226,8 +236,11 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	f.fields[f.cursor].input, cmd = f.fields[f.cursor].input.Update(msg)
-	if f.fields[f.cursor].id == fAccount {
+	switch f.fields[f.cursor].id {
+	case fAccount:
 		f.syncAccount()
+	case fAuth:
+		f.syncAuth()
 	}
 	return m, cmd
 }
@@ -270,6 +283,9 @@ func (f *form) view(width, height int) string {
 func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	f := m.form
 	switch f.kind {
+	case formAccount:
+		return m.submitAccount()
+
 	case formImport:
 		return m.submitImport()
 
@@ -385,4 +401,24 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// pushForm opens a form on top of the one already showing.
+func (m *Model) pushForm(f *form) {
+	if m.form != nil {
+		m.formStack = append(m.formStack, m.form)
+	}
+	m.form = f
+	m.mode = modeForm
+}
+
+// popForm returns to the form underneath, and reports whether there was one.
+func (m *Model) popForm() bool {
+	if len(m.formStack) == 0 {
+		return false
+	}
+	m.form = m.formStack[len(m.formStack)-1]
+	m.formStack = m.formStack[:len(m.formStack)-1]
+	m.mode = modeForm
+	return true
 }

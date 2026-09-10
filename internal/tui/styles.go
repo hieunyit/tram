@@ -64,11 +64,12 @@ type glyphs struct {
 	marked   string
 	unmarked string
 	drift    string
+	plus     string
 }
 
 func newGlyphs(ascii bool) glyphs {
 	if ascii {
-		return glyphs{star: "*", clock: "~", check: "ok", cross: "!!", dot: "-", arrow: "->", marked: "[x]", unmarked: "[ ]", drift: "*"}
+		return glyphs{star: "*", clock: "~", check: "ok", cross: "!!", dot: "-", arrow: "->", marked: "[x]", unmarked: "[ ]", drift: "*", plus: "+"}
 	}
-	return glyphs{star: "★", clock: "🕒", check: "✓", cross: "✗", dot: "·", arrow: "→", marked: "◉", unmarked: "○", drift: "*"}
+	return glyphs{star: "★", clock: "🕒", check: "✓", cross: "✗", dot: "·", arrow: "→", marked: "◉", unmarked: "○", drift: "*", plus: "＋"}
 }

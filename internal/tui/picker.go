@@ -170,13 +170,34 @@ func (m *Model) openFieldPicker(id fieldID) (tea.Model, tea.Cmd) {
 			return nil
 		})
 	case fAccount:
-		items := []choice{{value: "", label: "(none)", note: "leave User and IdentityFile to the stanza"}}
-		for _, a := range m.inv.Store.AccountList() {
-			items = append(items, choice{value: a.Name, label: a.Name, note: a.User + " " + string(a.Auth)})
+		none, note := "(none)", "leave User and IdentityFile to the stanza"
+		if m.form.kind == formImport {
+			none, note = "(none)", "do not link the imported hosts"
 		}
-		m.showPicker("account", items, func(v string) tea.Cmd {
+		m.showPicker("account", m.accountChoices(none, note), func(v string) tea.Cmd {
+			if v == newAccountEntry {
+				m.openAccountForm(func(name string) tea.Cmd {
+					m.form.set(fAccount, name)
+					m.form.syncAccount()
+					return nil
+				})
+				return nil
+			}
 			m.form.set(fAccount, v)
 			m.form.syncAccount()
+			return nil
+		})
+
+	case fAuth:
+		m.showPicker("how this identity proves itself", m.authChoices(), func(v string) tea.Cmd {
+			m.form.set(fAuth, v)
+			m.form.syncAuth()
+			return nil
+		})
+
+	case fKey:
+		m.openFileBrowser(m.form.get(fKey), func(v string) tea.Cmd {
+			m.form.set(fKey, v)
 			return nil
 		})
 	case fGroup:
@@ -184,7 +205,14 @@ func (m *Model) openFieldPicker(id fieldID) (tea.Model, tea.Cmd) {
 		for _, g := range m.inv.Groups() {
 			items = append(items, choice{value: g, label: g})
 		}
+		// A group is not a thing you create, it is a name you write, so the
+		// entry that "makes" one simply gets out of the way of the keyboard.
+		items = append(items, choice{value: newGroupEntry, label: m.gl.plus + " type a new one", create: true})
 		m.showPicker("group", items, func(v string) tea.Cmd {
+			if v == newGroupEntry {
+				m.problem = "type the group; slashes nest it, as in prod/web"
+				return nil
+			}
 			m.form.set(fGroup, v)
 			return nil
 		})
@@ -235,33 +263,47 @@ func (m *Model) jumpChoices(self string) []choice {
 func (m *Model) openAccountPicker() (tea.Model, tea.Cmd) {
 	sel := m.selection()
 	if len(sel) == 0 {
+		// Nothing to link, so the only useful thing the key can do is make an
+		// identity for later.
+		m.openAccountForm(nil)
 		return m, nil
 	}
-	items := []choice{{value: "", label: "(unlink)", note: "keeps User and IdentityFile as they are"}}
-	for _, a := range m.inv.Store.AccountList() {
-		items = append(items, choice{value: a.Name, label: a.Name, note: a.User + " " + string(a.Auth)})
-	}
+	items := m.accountChoices("(unlink)", "keeps User and IdentityFile as they are")
 	title := fmt.Sprintf("link %d host(s) to an account", len(sel))
 	m.showPicker(title, items, func(v string) tea.Cmd {
+		if v == newAccountEntry {
+			m.openAccountForm(func(name string) tea.Cmd { return m.linkSelection(sel, name) })
+			return nil
+		}
+		return m.linkSelection(sel, v)
+	})
+	return m, nil
+}
+
+// newGroupEntry is the picker value that means "let me type it".
+var newGroupEntry = string(rune(0)) + "new-group"
+
+// linkSelection points hosts at an account, or clears the link.
+func (m *Model) linkSelection(sel []model.Host, account string) tea.Cmd {
+	return func() tea.Msg {
 		n := 0
 		for _, h := range sel {
-			spec := inventory.Spec{Name: h.Name, Account: inventory.Str(v)}
+			spec := inventory.Spec{Name: h.Name, Account: inventory.Str(account)}
 			ch, err := m.inv.Edit(h.Name, spec, false)
 			if err != nil {
-				return fail(err)
+				return errMsg{err}
 			}
 			if err := ch.Apply(); err != nil {
-				return fail(err)
+				return errMsg{err}
 			}
 			n++
 		}
 		m.reload()
-		if v == "" {
-			return note(fmt.Sprintf("unlinked %d host(s)", n))
+		if account == "" {
+			return reloadMsg(fmt.Sprintf("unlinked %d host(s)", n))
 		}
-		return note(fmt.Sprintf("linked %d host(s) to %s", n, v))
-	})
-	return m, nil
+		return reloadMsg(fmt.Sprintf("linked %d host(s) to %s", n, account))
+	}
 }
 
 func (m *Model) openSnippetPicker() (tea.Model, tea.Cmd) {

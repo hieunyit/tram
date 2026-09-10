@@ -342,7 +342,7 @@ func (m *Model) viewHelp() string {
 		{"esc", "clear the search, then the marks"},
 		{"a e c d", "add, edit, clone, delete a host"},
 		{"E", "edit every marked host at once"},
-		{"A", "link the selection to an account"},
+		{"A", "link the selection to an account, or make one"},
 		{"p D x r", "ping, doctor, run a command, run a snippet"},
 		{"I", "import an Ansible inventory or a CSV export"},
 		{"*", "pin a host to the top of nothing in particular, but mark it"},

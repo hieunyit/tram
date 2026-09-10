@@ -205,6 +205,12 @@ marks hosts, `/` searches (a query starting with `#` matches groups),
 links to an account, `p`/`D`/`x`/`r` run ping, doctor, a command and a snippet,
 `I` imports an inventory, `*` pins, `tab` shows detail, `?` lists the keys.
 
+The account, group and jump fields open a list rather than asking you to
+remember what exists, and the account list can make one: filling in a host and
+finding the identity does not exist yet no longer costs you the half-filled
+host, because the account form opens on top and hands back to it. The key field
+opens the folder, the same as the import screen's.
+
 **Results.** One collapsible block per host, `space` expands, `enter` connects
 to whichever host is selected. An import preview uses the same screen, where
 `w` writes the hosts and `esc` throws the plan away.
