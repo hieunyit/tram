@@ -35,7 +35,25 @@ tram doctor web1           walk the route, stop at the first broken station
 tram doctor --config       check ssh_config itself
 tram exec -g prod -- df -h run a command across a group
 tram import inventory.ini  read an Ansible inventory or a CSV export
+tram web1 -v               connect, with ssh narrating its own progress
 ```
+
+## When a host will not open
+
+ssh sets no connect timeout of its own and prints nothing while it waits, so a
+machine that is not answering looks exactly like a hung program. Two commands
+answer it.
+
+`tram doctor web1` tries every station on the route in turn and stops at the
+first that fails, naming it and what kind of failure it was. It uses a timeout,
+so it answers in seconds rather than minutes.
+
+`tram web1 -v` runs the real connection with ssh's own narration, which says
+which address it is still waiting on. Repeat the flag for more.
+
+Pressing ctrl+c only reaches ssh while it is still connecting: once a session is
+open the key goes to the program on the far side. So an interrupt means it never
+got in, and tram says where to look next.
 
 Every command that reads something takes `-f json`, `-f yaml`, `-f csv` or
 `-f value`. Every command that writes something takes `--dry-run` and `--diff`,

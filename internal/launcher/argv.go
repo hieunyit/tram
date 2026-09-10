@@ -37,6 +37,11 @@ type Request struct {
 	// ConnectTimeout in seconds, zero for ssh's default.
 	ConnectTimeout int
 
+	// Verbose adds that many -v flags, so ssh narrates a connection that is
+	// going nowhere. It is the difference between a blank screen and a line
+	// naming the address it is still waiting on.
+	Verbose int
+
 	// Extra are additional ssh arguments, inserted before the host name.
 	Extra []string
 }
@@ -71,6 +76,9 @@ func (r Request) Argv() []string {
 		argv = append(argv, "-t")
 	case r.NoTTY:
 		argv = append(argv, "-T")
+	}
+	for i := 0; i < r.Verbose && i < 3; i++ {
+		argv = append(argv, "-v")
 	}
 	argv = append(argv, r.Extra...)
 	argv = append(argv, r.Host)

@@ -327,6 +327,9 @@ Nothing is executed and nothing is recorded.`,
 			return nil
 		},
 	}
+	// The same flags as a real connection, since the whole point is to show
+	// what that connection would be.
+	addConnectFlags(c)
 	return c
 }
 

@@ -18,6 +18,7 @@ type connectOptions struct {
 	Window  bool
 	NoTTY   bool
 	Timeout int
+	Verbose int
 }
 
 var connectFlags connectOptions
@@ -29,6 +30,7 @@ func addConnectFlags(c *cobra.Command) {
 	f.BoolVar(&connectFlags.Window, "window", false, "open the session in a new terminal window or tab")
 	f.BoolVar(&connectFlags.NoTTY, "no-tty", false, "do not ask ssh for a terminal")
 	f.IntVar(&connectFlags.Timeout, "connect-timeout", 0, "seconds to wait for the connection")
+	f.CountVarP(&connectFlags.Verbose, "verbose", "v", "show ssh's own progress; repeat for more")
 }
 
 // runConnect opens a session, or runs one command and exits.
@@ -88,8 +90,13 @@ func runConnect(a *App, name string, remote []string, opt connectOptions) error 
 		return nil
 	}
 	if res.Interrupted {
-		// The user stopped it. There is nothing to report and nothing to
-		// pause over; a script still gets a non-zero status.
+		// ctrl+c only reaches ssh while it is still trying to connect: once a
+		// session is open the key goes to the program on the far side. So an
+		// interrupt means it never got in, and saying where to look next is
+		// worth one line. No pause: they just pressed ctrl+c to get out.
+		fmt.Fprintf(os.Stderr,
+			"gave up on %s. `tram doctor %s` stops at the first thing that does not answer; `tram %s -v` shows ssh's own progress.\n",
+			h.Name, h.Name, h.Name)
 		return ExitCode{Code: res.ExitCode}
 	}
 	if res.SSHFailed {
@@ -195,6 +202,7 @@ func buildRequest(a *App, host string, remote []string, opt connectOptions) laun
 		NoTTY:          opt.NoTTY,
 		ForceTTY:       len(remote) > 0 && !opt.NoTTY,
 		ConnectTimeout: opt.Timeout,
+		Verbose:        opt.Verbose,
 	}
 }
 
