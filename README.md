@@ -251,7 +251,14 @@ one for each marked host, and `V` opens a pane beside the list instead. Neither
 gives up the screen: the terminal does the work, so the list is still there when
 the tab appears, and the bar says what was opened. On Windows Terminal these are
 `wt -w 0 new-tab` and `wt -w 0 split-pane`; under tmux they are a window and a
-split. Elsewhere `V` falls back to a window and says so. More than six tabs at
+split. Elsewhere `V` falls back to a window and says so.
+
+`-w 0` means the Windows Terminal window most recently used, which is the right
+window only when tram is running in one. Started from some other terminal on a
+machine that merely has Windows Terminal installed, a tab would land in an
+application you are not looking at, so tram asks for a window of its own instead
+and the bar says that is what it did. Run tram inside Windows Terminal to get
+tabs in the window you are already in. More than six tabs at
 once asks first, because marking forty hosts and brushing `W` should not cost
 you forty tabs.
 

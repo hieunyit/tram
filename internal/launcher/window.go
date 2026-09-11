@@ -1,11 +1,13 @@
 package launcher
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Terminal names a family of terminal programs tram knows how to open a new
@@ -64,6 +66,14 @@ func linuxTerminalBin() (string, Terminal, bool) {
 	}
 	return "", TermNone, false
 }
+
+// InsideWindowsTerminal reports whether tram is running in a Windows Terminal
+// window, as opposed to merely on a machine that has one installed.
+//
+// The difference decides where a new tab lands. Windows Terminal will happily
+// open a tab in a window belonging to somebody else's session, which from where
+// you are sitting looks exactly like nothing happening.
+func InsideWindowsTerminal() bool { return os.Getenv("WT_SESSION") != "" }
 
 // DetectTerminal works out which terminal tram is running inside, from the
 // environment the terminal itself sets.
@@ -131,7 +141,15 @@ func WindowCommand(t Terminal, self, host string, override []string) ([]string, 
 
 	switch t {
 	case TermWindowsTerminal:
-		return []string{"wt.exe", "-w", "0", "new-tab", "--title", host, self, host}, nil
+		// -w 0 means the window most recently used, which is the right answer
+		// only when that window is the one tram is drawing in. Run from any
+		// other terminal, it puts the tab in an application the user is not
+		// looking at, so there a window of its own is the honest thing.
+		where := "new"
+		if InsideWindowsTerminal() {
+			where = "0"
+		}
+		return []string{"wt.exe", "-w", where, "new-tab", "--title", host, self, host}, nil
 	case TermTmux:
 		return []string{"tmux", "new-window", "-n", host, self + " " + host}, nil
 	case TermITerm, TermApple:
@@ -163,6 +181,11 @@ func WindowCommand(t Terminal, self, host string, override []string) ([]string, 
 func SplitCommand(t Terminal, self, host string, override []string) (argv []string, split bool, err error) {
 	switch t {
 	case TermWindowsTerminal:
+		// A pane is beside something. Beside what, if tram is not in that
+		// window at all? So this one asks where it is before it offers.
+		if !InsideWindowsTerminal() {
+			break
+		}
 		return []string{"wt.exe", "-w", "0", "split-pane", "--title", host, self, host}, true, nil
 	case TermTmux:
 		return []string{"tmux", "split-window", "-h", self + " " + host}, true, nil
@@ -172,20 +195,48 @@ func SplitCommand(t Terminal, self, host string, override []string) (argv []stri
 }
 
 // OpenQuietly launches a window or a pane without letting it write anything to
-// this terminal.
+// this terminal, and gives it a moment to fail.
 //
-// The interface is drawing on the alternate screen while this runs, and a line
-// of chatter from wt.exe would land in the middle of the host list.
+// The interface is drawing on the alternate screen while this runs, so a line
+// of chatter from wt.exe would land in the middle of the host list. It is still
+// read: a launcher that failed used to do so in silence, and the interface said
+// a tab had opened when none had.
 func OpenQuietly(argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("no window command")
 	}
+	var said bytes.Buffer
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdout, cmd.Stderr = &said, &said
+
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start %s: %w", argv[0], err)
+		return fmt.Errorf("%s: %w", argv[0], err)
 	}
-	go func() { _ = cmd.Wait() }()
-	return nil
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			return nil
+		}
+		if msg := strings.TrimSpace(said.String()); msg != "" {
+			return fmt.Errorf("%s: %s", argv[0], firstLine(msg))
+		}
+		return fmt.Errorf("%s: %w", argv[0], err)
+	case <-time.After(1500 * time.Millisecond):
+		// Still running. A terminal that stays in the foreground is one that
+		// opened, so this is the good ending.
+		go func() { <-done }()
+		return nil
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i > 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // OpenWindow launches the new window and returns without waiting for it.

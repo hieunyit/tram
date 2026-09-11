@@ -200,7 +200,7 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 			return "", err
 		}
 		if !split {
-			return h.Name + " opened in a window; " + string(t) + " cannot split", nil
+			return h.Name + " opened in a window; " + whereabouts(t) + " cannot split here", nil
 		}
 		return h.Name + " opened beside the list", nil
 	}
@@ -214,10 +214,16 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 			return "", err
 		}
 	}
-	if len(hosts) == 1 {
-		return hosts[0].Name + " opened in a new tab", nil
+	// Where it went is worth saying. Run from a terminal that is not the one
+	// the tab lands in, "opened a tab" is true and useless.
+	what := "a new tab"
+	if t == launcher.TermWindowsTerminal && !launcher.InsideWindowsTerminal() {
+		what = "a Windows Terminal window"
 	}
-	return fmt.Sprintf("opened %d tabs", len(hosts)), nil
+	if len(hosts) == 1 {
+		return hosts[0].Name + " opened in " + what, nil
+	}
+	return fmt.Sprintf("opened %d of %s", len(hosts), what), nil
 }
 
 // Files opens a shell on a host for the two-pane browser.
@@ -250,6 +256,19 @@ func (r *tuiRunner) Files(h model.Host) (tui.FileSystem, error) {
 // Copy moves one file or folder between this machine and a host.
 func (r *tuiRunner) Copy(job remote.Copy) error {
 	return job.Run(r.app.SSHConfigArg(), os.Environ())
+}
+
+// whereabouts names a terminal the way the user would.
+func whereabouts(t launcher.Terminal) string {
+	switch t {
+	case launcher.TermWindowsTerminal:
+		return "Windows Terminal"
+	case launcher.TermTmux:
+		return "tmux"
+	case launcher.TermNone:
+		return "no terminal tram recognises"
+	}
+	return string(t)
 }
 
 // Agent reports what the ssh agent is holding.
