@@ -348,7 +348,11 @@ func (m *Model) openSnippetPicker() (tea.Model, tea.Cmd) {
 		}
 		if sn.Confirm {
 			m.confirmText = fmt.Sprintf("%s is marked as needing confirmation. Run %q on %d host(s)?", sn.Name, sn.Command, len(sel))
-			m.confirmFn = func() tea.Cmd { return results("snippet: "+sn.Name, m.Runner.Exec(sel, sn.Command)) }
+			runner, hosts := m.Runner, append([]model.Host(nil), sel...)
+			m.confirmFn = func() tea.Cmd {
+				m.running = fmt.Sprintf("%s on %d host(s)", sn.Name, len(hosts))
+				return resultsFrom("snippet: "+sn.Name, func() []Row { return runner.Exec(hosts, sn.Command) })
+			}
 			m.mode = modeConfirm
 			return nil
 		}
@@ -391,6 +395,14 @@ func (m *Model) confirmDelete() (tea.Model, tea.Cmd) {
 		m.reload()
 		return note(fmt.Sprintf("deleted %d host(s)", n))
 	}
+	m.mode = modeConfirm
+	return m, nil
+}
+
+// confirm puts a question in the bar and holds the work until it is answered.
+func (m *Model) confirm(text string, run func() tea.Cmd) (tea.Model, tea.Cmd) {
+	m.confirmText = text
+	m.confirmFn = run
 	m.mode = modeConfirm
 	return m, nil
 }

@@ -346,8 +346,9 @@ func authOf(h model.Host) string {
 func (m *Model) actionChips(w, x, y int) string {
 	pairs := [][3]string{
 		{m.gl.enter, "connect", "enter"},
+		{"W", "tab", "W"},
+		{"V", "beside", "V"},
 		{"f", "sftp", "f"},
-		{"e", "edit", "e"},
 		{"p", "ping", "p"},
 	}
 	var b strings.Builder

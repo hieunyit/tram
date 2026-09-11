@@ -22,8 +22,6 @@ const (
 	ActionQuit Action = iota
 	// ActionConnect means hand the terminal to ssh for Host.
 	ActionConnect
-	// ActionWindow means open Host in a new terminal window.
-	ActionWindow
 	// ActionSFTP means hand the terminal to sftp for Host.
 	ActionSFTP
 )
@@ -177,6 +175,10 @@ type Runner interface {
 	// Agent reports what the ssh agent holds, in a few words, or says that
 	// there is not one.
 	Agent() string
+	// Open puts hosts in front of the user without tram giving up the screen:
+	// a tab each, or a pane beside the list. It says what it did, because what
+	// a terminal can do varies and the answer is worth a line in the bar.
+	Open(hosts []model.Host, beside bool) (string, error)
 	Doctor(hosts []model.Host) []Row
 	Exec(hosts []model.Host, command string) []Row
 }

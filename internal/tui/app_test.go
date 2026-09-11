@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,25 @@ func (nullRunner) Measure(hosts []model.Host) []Measurement {
 	return out
 }
 
-func (nullRunner) Agent() string                   { return "agent 2 keys" }
+func (nullRunner) Agent() string { return "agent 2 keys" }
+
+// opened records what the interface asked the terminal for, so the tests can
+// tell a tab from a pane without a terminal being anywhere near them.
+type opened struct {
+	hosts  []string
+	beside bool
+}
+
+var lastOpen *opened
+
+func (nullRunner) Open(hosts []model.Host, beside bool) (string, error) {
+	lastOpen = &opened{hosts: model.Names(hosts), beside: beside}
+	if beside {
+		return hosts[0].Name + " opened beside the list", nil
+	}
+	return fmt.Sprintf("opened %d tabs", len(hosts)), nil
+}
+
 func (nullRunner) Doctor(hosts []model.Host) []Row { return nil }
 func (nullRunner) Exec(hosts []model.Host, command string) []Row {
 	return []Row{{Host: hosts[0].Name, Status: "OK", OK: true, Summary: "exit 0", Body: command}}

@@ -85,9 +85,9 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.quitWith(ActionConnect, h.Name)
 		}
 	case "shift+enter", "alt+enter", "W":
-		if h, ok := m.current(); ok {
-			return m.quitWith(ActionWindow, h.Name)
-		}
+		return m.openElsewhere(m.selection(), false)
+	case "V":
+		return m.openElsewhere(m.selection(), true)
 	case "f":
 		if h, ok := m.current(); ok {
 			return m.quitWith(ActionSFTP, h.Name)
@@ -202,6 +202,40 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeHelp
 	}
 	return m, nil
+}
+
+// tabsWithoutAsking is how many tabs a single keystroke may open before it
+// stops and asks. Marking forty hosts and pressing W by accident should not
+// cost you forty tabs.
+const tabsWithoutAsking = 6
+
+// openElsewhere opens hosts in the terminal tram is already running in, and
+// stays on screen while it happens.
+//
+// This is the whole point of it: a new tab or a pane beside the list costs tram
+// nothing, because the terminal does the work. Only enter gives up the screen,
+// and only because ssh needs it.
+func (m *Model) openElsewhere(hosts []model.Host, beside bool) (tea.Model, tea.Cmd) {
+	if len(hosts) == 0 {
+		return m, nil
+	}
+	if len(hosts) > tabsWithoutAsking && !beside {
+		what := fmt.Sprintf("open %d tabs, one for each marked host?", len(hosts))
+		return m.confirm(what, func() tea.Cmd { return m.openCmd(hosts, beside) })
+	}
+	return m, m.openCmd(hosts, beside)
+}
+
+func (m *Model) openCmd(hosts []model.Host, beside bool) tea.Cmd {
+	runner := m.Runner
+	list := append([]model.Host(nil), hosts...)
+	return func() tea.Msg {
+		said, err := runner.Open(list, beside)
+		if err != nil {
+			return errMsg{err}
+		}
+		return reloadMsg(said)
+	}
 }
 
 // setTab switches the view and puts the cursor back at the top, because the row
@@ -905,8 +939,8 @@ func (m *Model) listKeys() [][2]string {
 		return [][2]string{{"a", "new key"}, {"e", "edit"}, {"1", "hosts"}, {"?", "help"}, {"q", "quit"}}
 	}
 	return [][2]string{
-		{m.gl.enter, "connect"}, {"space", "mark"}, {"f", "sftp"}, {"p", "ping"},
-		{"a", "add"}, {"e", "edit"}, {"E", "batch edit"}, {"d", "del"},
+		{m.gl.enter, "connect"}, {"space", "mark"}, {"W", "tab"}, {"V", "beside"},
+		{"f", "sftp"}, {"p", "ping"}, {"a", "add"}, {"e", "edit"}, {"d", "del"},
 		{"I", "import"}, {"x", "exec"}, {"D", "doctor"}, {"s", "sort"},
 		{"/", "filter"}, {"?", "help"}, {"q", "quit"},
 	}
@@ -950,7 +984,8 @@ func (m *Model) viewHelp() string {
 	rows := [][2]string{
 		{"enter", "connect: tram exits, ssh takes the terminal, tram comes back"},
 		{"ctrl+k", "the command palette: every action, by name"},
-		{"W", "connect in a new terminal window or tab"},
+		{"W", "open a tab for every marked host; tram stays where it is"},
+		{"V", "open beside the list, in a pane of the same window"},
 		{"f", "open sftp against the selected host"},
 		{"y", "copy the ssh command for the selected host"},
 		{"space", "mark a host; actions then apply to every marked host"},

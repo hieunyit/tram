@@ -8,7 +8,11 @@ chain is a line of them.
 ## What tram is not
 
 - **Not a terminal emulator.** Your terminal is better than anything I could
-  write. `enter` hands the wheel to `ssh` running in the real terminal.
+  write. `enter` hands the wheel to `ssh` running in the real terminal. This is
+  also why there is no tab strip inside tram: drawing one would mean rendering
+  the session under it, which means a VT parser, scrollback, resize and mouse
+  forwarding, and getting any of it wrong breaks vim. The tabs belong to your
+  terminal, and tram opens them for you.
 - **Not a private connection store.** There is no `connections.yaml`. Delete
   tram and `ssh web1` still works. This is the largest single difference from
   most tools in this category.
@@ -231,7 +235,7 @@ port, then the tags, then the date, and the alias is the last to give ground.
 `tab` moves between the tree and the table, `g` puts the tree away and `i` puts
 the details away.
 
-`enter` connects, `W` opens a new window, `f` opens sftp, `y` copies the ssh
+`enter` connects, `f` opens sftp, `y` copies the ssh
 command, `space` marks hosts, `/` searches, `a`/`e`/`c`/`d` add, edit, clone and
 delete, `E` edits everything marked, `A` links to an account, `x` runs a
 command, `r` runs a snippet, `D` runs the doctor, `I` imports an inventory, `*`
@@ -241,6 +245,15 @@ pins, `?` lists the keys.
 as you type. Nothing in it is implemented twice. Each entry replays the key that
 already does the job, so a palette entry cannot drift away from the key it
 claims to be, and neither can the right-click menu.
+
+**Tabs and panes.** `W` opens a tab in the terminal tram is already running in,
+one for each marked host, and `V` opens a pane beside the list instead. Neither
+gives up the screen: the terminal does the work, so the list is still there when
+the tab appears, and the bar says what was opened. On Windows Terminal these are
+`wt -w 0 new-tab` and `wt -w 0 split-pane`; under tmux they are a window and a
+split. Elsewhere `V` falls back to a window and says so. More than six tabs at
+once asks first, because marking forty hosts and brushing `W` should not cost
+you forty tabs.
 
 **The mouse** works, and the design is why: a row selects, the box at its left
 end marks, a column heading sorts by that column and sorts back when clicked

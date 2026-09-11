@@ -54,7 +54,8 @@ func (m *Model) commands() []command {
 	return []command{
 		{label: "Connect to " + name, key: "enter"},
 		{label: "Open SFTP on " + name, key: "f"},
-		{label: "Open " + name + " in a new window", key: "W"},
+		{label: "Open " + targets + " in a tab each", key: "W"},
+		{label: "Open " + name + " beside the list", key: "V"},
 		{label: "Copy the ssh command for " + name, key: "y"},
 		{label: "Edit " + name, key: "e"},
 		{label: "Clone " + name, key: "c"},
@@ -191,7 +192,8 @@ func (m *Model) openMenu(x, y int) (tea.Model, tea.Cmd) {
 		m.menuItems = []command{
 			{label: "Connect", key: "enter"},
 			{label: "Open SFTP", key: "f"},
-			{label: "New window", key: "W"},
+			{label: "Open in a tab", key: "W"},
+			{label: "Open beside the list", key: "V"},
 			{label: "Copy ssh command", key: "y"},
 			{sep: true},
 			{label: "Edit", key: "e"},

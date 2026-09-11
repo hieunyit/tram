@@ -154,6 +154,40 @@ func WindowCommand(t Terminal, self, host string, override []string) ([]string, 
 	return nil, fmt.Errorf("cannot open a window: %s", WhyNoWindow())
 }
 
+// SplitCommand builds the command that opens host beside whatever is already on
+// screen, rather than in a tab of its own.
+//
+// Only two terminals can do this: Windows Terminal and tmux. Everywhere else the
+// caller is told so and given a window command instead, because a key that does
+// nothing is worse than a key that does the next best thing.
+func SplitCommand(t Terminal, self, host string, override []string) (argv []string, split bool, err error) {
+	switch t {
+	case TermWindowsTerminal:
+		return []string{"wt.exe", "-w", "0", "split-pane", "--title", host, self, host}, true, nil
+	case TermTmux:
+		return []string{"tmux", "split-window", "-h", self + " " + host}, true, nil
+	}
+	argv, err = WindowCommand(t, self, host, override)
+	return argv, false, err
+}
+
+// OpenQuietly launches a window or a pane without letting it write anything to
+// this terminal.
+//
+// The interface is drawing on the alternate screen while this runs, and a line
+// of chatter from wt.exe would land in the middle of the host list.
+func OpenQuietly(argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("no window command")
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start %s: %w", argv[0], err)
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
 // OpenWindow launches the new window and returns without waiting for it.
 func OpenWindow(argv []string) error {
 	if len(argv) == 0 {

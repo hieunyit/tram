@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/hieuny/tram/internal/launcher"
 	"github.com/hieuny/tram/internal/model"
 	"github.com/hieuny/tram/internal/probe"
 	"github.com/hieuny/tram/internal/runner"
@@ -54,10 +55,6 @@ func runTUI(a *App) error {
 			return nil
 		case tui.ActionConnect:
 			if err := reportSession(runConnect(a, out.Host, nil, connectOptions{})); err != nil {
-				return err
-			}
-		case tui.ActionWindow:
-			if err := reportSession(runConnect(a, out.Host, nil, connectOptions{Window: true})); err != nil {
 				return err
 			}
 		case tui.ActionSFTP:
@@ -172,6 +169,54 @@ func (r *tuiRunner) Measure(hosts []model.Host) []tui.Measurement {
 		out[i] = mm
 	}
 	return out
+}
+
+// Open puts hosts in a tab each, or one of them in a pane beside the list.
+//
+// tram does not give up the screen for this: the terminal opens the tab and
+// tram carries on drawing, which is the difference between this and enter.
+func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
+	inv, err := r.app.Inventory()
+	if err != nil {
+		return "", err
+	}
+	self := launcher.SelfPath()
+	t := launcher.Terminal(inv.Store.Options.Terminal)
+	if t == launcher.TermNone {
+		t = launcher.DetectTerminal()
+	}
+	override := inv.Store.Options.WindowCommand
+
+	if beside {
+		// A pane is about one host: there is no useful reading of "put six
+		// hosts beside the list".
+		h := hosts[0]
+		argv, split, err := launcher.SplitCommand(t, self, h.Name, override)
+		if err != nil {
+			return "", err
+		}
+		if err := launcher.OpenQuietly(argv); err != nil {
+			return "", err
+		}
+		if !split {
+			return h.Name + " opened in a window; " + string(t) + " cannot split", nil
+		}
+		return h.Name + " opened beside the list", nil
+	}
+
+	for _, h := range hosts {
+		argv, err := launcher.WindowCommand(t, self, h.Name, override)
+		if err != nil {
+			return "", err
+		}
+		if err := launcher.OpenQuietly(argv); err != nil {
+			return "", err
+		}
+	}
+	if len(hosts) == 1 {
+		return hosts[0].Name + " opened in a new tab", nil
+	}
+	return fmt.Sprintf("opened %d tabs", len(hosts)), nil
 }
 
 // Agent reports what the ssh agent is holding.

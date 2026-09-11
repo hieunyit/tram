@@ -355,3 +355,74 @@ func msgTypes(cmd tea.Cmd) string {
 	}
 	return fmt.Sprintf("%T", msg)
 }
+
+// TestOpeningTabsKeepsTheInterfaceUp is the difference between W and enter.
+// enter gives ssh the terminal and tram exits; W asks the terminal for a tab and
+// tram carries on drawing, so the list is still there when the tab opens.
+func TestOpeningTabsKeepsTheInterfaceUp(t *testing.T) {
+	m := wide(t)
+	lastOpen = nil
+
+	send(m, "W")
+	if m.quit {
+		t.Fatal("opening a tab gave up the screen")
+	}
+	if lastOpen == nil {
+		t.Fatal("nothing was opened")
+	}
+	if len(lastOpen.hosts) != 1 || lastOpen.hosts[0] != "bastion" {
+		t.Errorf("opened %v, want the host under the cursor", lastOpen.hosts)
+	}
+	if lastOpen.beside {
+		t.Error("W asked for a pane rather than a tab")
+	}
+	if !strings.Contains(m.View(), "opened 1 tab") {
+		t.Errorf("the bar does not say what happened:\n%s", m.View())
+	}
+
+	// V is the same journey into a pane beside the list.
+	lastOpen = nil
+	send(m, "V")
+	if lastOpen == nil || !lastOpen.beside {
+		t.Errorf("V did not ask for a pane: %+v", lastOpen)
+	}
+}
+
+// TestOpeningATabPerMarkedHost covers marking several and opening them at once,
+// and the question that stands between a slip of the finger and forty tabs.
+func TestOpeningATabPerMarkedHost(t *testing.T) {
+	m := wide(t)
+	lastOpen = nil
+	send(m, "space", "space") // bastion and laptop
+
+	send(m, "W")
+	if lastOpen == nil || len(lastOpen.hosts) != 2 {
+		t.Fatalf("W opened %+v, want both marked hosts", lastOpen)
+	}
+
+	// More than a handful asks first.
+	lastOpen = nil
+	many := m.filtered
+	for len(many) <= tabsWithoutAsking {
+		many = append(many, m.hosts[0])
+	}
+	m.filtered = many
+	for _, h := range many {
+		m.marked[h.Name] = true
+	}
+	m.marked["one"], m.marked["two"], m.marked["three"] = true, true, true
+
+	if _, cmd := m.openElsewhere(many, false); cmd != nil {
+		t.Fatal("a tab storm started without asking")
+	}
+	if m.mode != modeConfirm {
+		t.Fatalf("opening %d tabs did not ask first", len(many))
+	}
+	if lastOpen != nil {
+		t.Error("something was opened before the question was answered")
+	}
+	send(m, "y")
+	if lastOpen == nil || len(lastOpen.hosts) != len(many) {
+		t.Errorf("answering yes opened %+v", lastOpen)
+	}
+}
