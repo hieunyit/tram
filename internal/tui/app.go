@@ -119,6 +119,16 @@ type Model struct {
 	// the same place, for the strips where that means something.
 	doubleClick bool
 
+	// mouse is whether the user wants the pointer at all, and mouseOn whether
+	// the terminal is reporting it at this moment. They differ while a box is
+	// taking typing: see syncMouse.
+	mouse   bool
+	mouseOn bool
+
+	// running names the fleet command working in the background, so that the
+	// bar can say what the interface is waiting for rather than going quiet.
+	running string
+
 	// measuring is how many hosts a sweep is still working through, or zero.
 	// The sweep runs off the main loop, so the interface stays usable while
 	// hundreds of connections are attempted.
@@ -191,6 +201,11 @@ func New(inv *inventory.Inventory, r Runner, ascii bool) *Model {
 		// looking for; i takes it away when the window is wanted for the table.
 		detail:  true,
 		sortDir: 1,
+
+		// The same setting the command layer reads to decide whether to ask
+		// the terminal for mouse reporting at all.
+		mouse:   inv.Store.Options.MouseOn(),
+		mouseOn: inv.Store.Options.MouseOn(),
 	}
 	m.reload()
 	return m
@@ -268,7 +283,46 @@ func (m *Model) selection() []model.Host {
 
 func (m *Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.checkAgent()) }
 
+// Update handles one message and then decides who should own the mouse.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mm, cmd := m.update(msg)
+	if hand := m.syncMouse(); hand != nil {
+		return mm, tea.Batch(cmd, hand)
+	}
+	return mm, cmd
+}
+
+// syncMouse hands the mouse back to the terminal while a box is taking typing.
+//
+// A captured mouse is a mouse the terminal cannot use for its own pasting and
+// selecting, and the one moment that matters most is while you are filling in
+// an address you copied from somewhere else. So the pointer belongs to tram
+// over a list, and to the terminal over a form.
+func (m *Model) syncMouse() tea.Cmd {
+	if !m.mouse {
+		return nil
+	}
+	want := !m.typing()
+	if want == m.mouseOn {
+		return nil
+	}
+	m.mouseOn = want
+	if want {
+		return tea.EnableMouseCellMotion
+	}
+	return tea.DisableMouse
+}
+
+// typing reports whether something on screen is taking keystrokes as text.
+func (m *Model) typing() bool {
+	switch m.mode {
+	case modeForm, modeSearch, modePicker, modePalette:
+		return true
+	}
+	return false
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -307,6 +361,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result.resize(m.width, m.listHeight())
 		m.screen = screenResult
 		m.mode = modeNormal
+		m.running = ""
 		return m, nil
 
 	case tea.MouseMsg:
@@ -414,8 +469,19 @@ type resultsMsg struct {
 
 func fail(err error) tea.Cmd { return func() tea.Msg { return errMsg{err} } }
 func note(s string) tea.Cmd  { return func() tea.Msg { return reloadMsg(s) } }
+
+// results carries rows that already exist.
 func results(title string, rows []Row) tea.Cmd {
 	return func() tea.Msg { return resultsMsg{title, rows} }
+}
+
+// resultsFrom runs the work off the main loop and shows what it returns.
+//
+// The work is ssh to every host in the selection, which is seconds at best and
+// a hung connection at worst. Running it inline froze the whole interface for
+// the duration, which looks exactly like a program that has crashed.
+func resultsFrom(title string, run func() []Row) tea.Cmd {
+	return func() tea.Msg { return resultsMsg{title, run()} }
 }
 
 // ---- shared chrome --------------------------------------------------------

@@ -917,6 +917,8 @@ func (m *Model) statusLine() string {
 	switch {
 	case m.problem != "":
 		return m.problem
+	case m.running != "":
+		return "running " + m.running + m.gl.ellipsis
 	case m.measuring > 0:
 		return fmt.Sprintf("measuring %d host(s)", m.measuring)
 	case m.status != "":

@@ -327,10 +327,12 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 			f.problem = "no command given"
 			return m, nil
 		}
-		hosts := f.targets
+		hosts := append([]model.Host(nil), f.targets...)
 		m.mode = modeNormal
 		m.form = nil
-		return m, results("exec: "+cmdText, m.Runner.Exec(hosts, cmdText))
+		m.running = fmt.Sprintf("%s on %d host(s)", cmdText, len(hosts))
+		runner := m.Runner
+		return m, resultsFrom("exec: "+cmdText, func() []Row { return runner.Exec(hosts, cmdText) })
 
 	case formBatch:
 		var applied int

@@ -99,6 +99,15 @@ func drain(m *Model, cmd tea.Cmd) {
 		if msg == nil {
 			return
 		}
+		// A batch is a list of commands, and the runtime runs every one of
+		// them. A harness that followed only the first would quietly drop the
+		// half of the work that matters.
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				drain(m, c)
+			}
+			return
+		}
 		if _, ok := msg.(cursor.BlinkMsg); ok {
 			return
 		}

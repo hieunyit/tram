@@ -250,9 +250,13 @@ button opens a menu for the row under the pointer. The chips along the bottom
 and the buttons in the panes are clickable too, and each is labelled with the
 key that does the same thing.
 
-Capturing the mouse takes selection and copying away from the terminal, which is
-a real loss. Most terminals give it back while you hold shift. If you would
-rather not have it at all, put `mouse = false` in `config.toml`.
+Capturing the mouse takes selection and pasting away from the terminal, which is
+a real loss. tram hands it back the moment a box takes typing: while a form, the
+search or the palette is open, the pointer belongs to the terminal again, so
+right-click and middle-click paste into a field the way they always did. Over a
+list it belongs to tram. Most terminals also give selection back while you hold
+shift. If you would rather not have it at all, put `mouse = false` in
+`config.toml`.
 
 **Sessions** is the same table over the hosts you have actually opened, most
 recent first. It is for getting back to what you were doing: the machine you
@@ -308,9 +312,15 @@ finding the identity does not exist yet no longer costs you the half-filled
 host, because the account form opens on top and hands back to it. The key field
 opens the folder, the same as the import screen's.
 
-**Results.** One collapsible block per host, `space` expands, `enter` connects
-to whichever host is selected. An import preview uses the same screen, where
-`w` writes the hosts and `esc` throws the plan away.
+**Results.** One block per host. A handful of hosts opens with the output
+already showing; more than that opens collapsed, because forty blocks of output
+is not a screen anyone can read, and `space` expands one while `o` expands them
+all. `enter` connects to whichever host is selected. An import preview uses the
+same screen, where `w` writes the hosts and `esc` throws the plan away.
+
+The work itself runs off the main loop. Ping, doctor and exec are ssh to every
+host in the selection, which is seconds at best and a hung connection at worst,
+and the bar says what it is waiting for while they run.
 
 The group tree carries three views above the hierarchy: **Favorites** for what
 you pinned, **Recent** for what you have opened, and **Marked** for what an

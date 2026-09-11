@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -254,4 +255,103 @@ func TestUsedByWarnsAboutJumpStations(t *testing.T) {
 	if strings.Contains(m.View(), "used by") {
 		t.Error("a host nothing depends on is still drawn as a jump station")
 	}
+}
+
+// TestExecShowsItsOutput is the bug a real session found: running a command on
+// one host put the answer behind a keystroke nobody knew to press.
+func TestExecShowsItsOutput(t *testing.T) {
+	m := newModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+	send(m, "x")
+	if m.mode != modeForm {
+		t.Fatal("x opened no form")
+	}
+	m.form.set(fCommand, "uptime")
+	send(m, "ctrl+s")
+
+	if m.screen != screenResult {
+		t.Fatalf("the result screen did not open; screen is %v", m.screen)
+	}
+	out := m.View()
+	if !strings.Contains(strings.ToLower(out), "exec: uptime") {
+		t.Errorf("the result screen does not name the command:\n%s", out)
+	}
+	// nullRunner echoes the command back as the body, and the heading above is
+	// upper case, so a lower case "uptime" on screen can only be the output
+	// itself, drawn with nothing pressed.
+	if !strings.Contains(out, "exit 0") {
+		t.Errorf("the result screen does not show the status:\n%s", out)
+	}
+	if !strings.Contains(out, "uptime") {
+		t.Errorf("the output is still collapsed behind a keystroke:\n%s", out)
+	}
+}
+
+// TestFleetCommandsRunOffTheMainLoop checks that the interface hands the work
+// to a command rather than doing it inside Update, where a hung ssh would
+// freeze the whole screen.
+func TestFleetCommandsRunOffTheMainLoop(t *testing.T) {
+	m := newModel(t)
+	_, cmd := m.Update(key("D"))
+	if cmd == nil {
+		t.Fatal("doctor produced no command")
+	}
+	if m.screen == screenResult {
+		t.Error("the result screen opened before the work had run")
+	}
+	if m.running == "" {
+		t.Error("the bar does not say what the interface is waiting for")
+	}
+	drain(m, cmd)
+	if m.screen != screenResult {
+		t.Error("the results never arrived")
+	}
+	if m.running != "" {
+		t.Error("the bar still claims something is running")
+	}
+}
+
+// TestTheTerminalGetsTheMouseBackWhileTyping is the other bug a real session
+// found: with the pointer captured, the terminal's own paste stopped working in
+// the one place it is needed most.
+func TestTheTerminalGetsTheMouseBackWhileTyping(t *testing.T) {
+	m := wide(t)
+	if !m.mouseOn {
+		t.Fatal("the interface did not take the mouse to begin with")
+	}
+
+	_, cmd := m.Update(key("a"))
+	if m.mouseOn {
+		t.Error("the form kept the mouse, so the terminal cannot paste into it")
+	}
+	if got := msgTypes(cmd); !strings.Contains(got, "disableMouse") {
+		t.Errorf("opening the form sent %s, which does not hand the mouse back", got)
+	}
+
+	send(m, "esc")
+	if !m.mouseOn {
+		t.Error("closing the form did not take the mouse back")
+	}
+	send(m, "/")
+	if m.mouseOn {
+		t.Error("the search box kept the mouse")
+	}
+}
+
+// msgTypes names what a command produces, so that a test can assert on the
+// messages bubbletea keeps to itself.
+func msgTypes(cmd tea.Cmd) string {
+	if cmd == nil {
+		return "nothing"
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var all []string
+		for _, c := range batch {
+			all = append(all, msgTypes(c))
+		}
+		return strings.Join(all, ", ")
+	}
+	return fmt.Sprintf("%T", msg)
 }

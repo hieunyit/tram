@@ -39,7 +39,16 @@ type resultView struct {
 }
 
 func newResultView(title string, rows []Row, st styles, gl glyphs) *resultView {
-	return &resultView{title: title, rows: rows, st: st, gl: gl, expanded: map[int]bool{}}
+	r := &resultView{title: title, rows: rows, st: st, gl: gl, expanded: map[int]bool{}}
+	// A handful of hosts opens with its output showing. Collapsing exists for a
+	// fleet, where forty blocks of output is not a screen you can read; for one
+	// host it is the answer to the question, hidden behind a keystroke.
+	if len(rows) <= 5 {
+		for i := range rows {
+			r.expanded[i] = true
+		}
+	}
+	return r
 }
 
 func (r *resultView) resize(w, h int) { r.width, r.height = w, h }
@@ -196,13 +205,16 @@ func importTally(p *inventory.ImportPlan) []string {
 }
 
 // runOn performs an action across the current selection and switches to the
-// result screen.
+// result screen when it finishes.
 func (m *Model) runOn(title string, fn func([]model.Host) []Row) (tea.Model, tea.Cmd) {
 	sel := m.selection()
 	if len(sel) == 0 {
 		return m, nil
 	}
-	// The work is synchronous: these commands finish in seconds and a spinner
-	// over a list that cannot be used meanwhile buys nothing.
-	return m, results(fmt.Sprintf("%s: %d host(s)", title, len(sel)), fn(sel))
+	// The selection is copied before it is handed over: the work runs on
+	// another goroutine, and sorting the table meanwhile rearranges the very
+	// slice it is walking.
+	hosts := append([]model.Host(nil), sel...)
+	m.running = fmt.Sprintf("%s on %d host(s)", title, len(hosts))
+	return m, resultsFrom(fmt.Sprintf("%s: %d host(s)", title, len(hosts)), func() []Row { return fn(hosts) })
 }

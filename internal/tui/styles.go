@@ -148,6 +148,7 @@ type glyphs struct {
 	crumb    string
 	enter    string
 	more     string
+	ellipsis string
 	up       string
 	down     string
 
@@ -166,7 +167,7 @@ func newGlyphs(ascii bool) glyphs {
 		return glyphs{
 			star: "*", clock: "~", check: "ok", cross: "!!", dot: "-", arrow: "->",
 			marked: "[x]", unmarked: "[ ]", drift: "*", plus: "+",
-			opened: "-", closed: "+", point: ">", crumb: ">", enter: "enter", more: "...",
+			opened: "-", closed: "+", point: ">", crumb: ">", enter: "enter", more: "...", ellipsis: "...",
 			up: "^", down: "v",
 			bar: "|", vline: "|", hline: "-",
 			bars: []string{".", ".", ":", ":", "|", "|", "#", "#"},
@@ -175,7 +176,7 @@ func newGlyphs(ascii bool) glyphs {
 	return glyphs{
 		star: "★", clock: "🕒", check: "✓", cross: "✗", dot: "·", arrow: "→",
 		marked: "◼", unmarked: "◻", drift: "*", plus: "＋",
-		opened: "▾", closed: "▸", point: "▸", crumb: "›", enter: "⏎", more: "···",
+		opened: "▾", closed: "▸", point: "▸", crumb: "›", enter: "⏎", more: "···", ellipsis: "…",
 		up: "↑", down: "↓",
 		bar: "▌", vline: "│", hline: "─",
 		bars: []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"},
