@@ -244,6 +244,9 @@ func (r *tuiRunner) Files(h model.Host) (tui.FileSystem, error) {
 		// the answers, and a profile printing a banner would be read as a file
 		// list.
 		Command: []string{"/bin/sh"},
+		// The same helper a session uses, so a passphrase already typed in this
+		// run opens the browser without asking for it a second time.
+		Askpass: askpassFor(r.app, inv, h),
 	}
 	timeout := time.Duration(max(inv.Store.Options.Timeout, 20)) * time.Second
 	return remote.Open(h.Name, remote.Options{
@@ -255,7 +258,15 @@ func (r *tuiRunner) Files(h model.Host) (tui.FileSystem, error) {
 
 // Copy moves one file or folder between this machine and a host.
 func (r *tuiRunner) Copy(job remote.Copy) error {
-	return job.Run(r.app.SSHConfigArg(), os.Environ())
+	env := os.Environ()
+	if inv, err := r.app.Inventory(); err == nil {
+		if h, ok := inv.Host(job.Host); ok {
+			// scp asks the same question ssh does, and can have the same
+			// answer: the one already given in this run.
+			env = launcher.Request{Askpass: askpassFor(r.app, inv, h)}.Env()
+		}
+	}
+	return job.Run(r.app.SSHConfigArg(), env)
 }
 
 // whereabouts names a terminal the way the user would.
