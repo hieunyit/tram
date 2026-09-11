@@ -392,9 +392,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.files = &filesView{
-			host:  msg.host,
-			sess:  msg.sess,
-			far:   filePane{dir: msg.dir, entries: msg.list, marked: map[string]bool{}},
+			host: msg.host,
+			sess: msg.sess,
+			far: filePane{
+				dir:     msg.dir,
+				entries: withParent(msg.dir, msg.list, false),
+				marked:  map[string]bool{},
+			},
 			local: filePane{marked: map[string]bool{}},
 		}
 		m.screen = screenFiles
@@ -415,11 +419,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.far {
 			side = &m.files.far
 		}
-		// A new directory is a new list: the cursor goes to the top and the
-		// marks go away, because they named files that are no longer on screen.
-		side.dir, side.entries = msg.dir, msg.list
+		// A new directory is a new list: the marks go away, because they named
+		// files that are no longer on screen.
+		side.dir = msg.dir
+		side.entries = withParent(msg.dir, msg.list, !msg.far)
 		side.cursor, side.offset = 0, 0
 		side.marked = map[string]bool{}
+		if side.want != "" {
+			for i, e := range side.entries {
+				if e.Name == side.want {
+					side.cursor = i
+					break
+				}
+			}
+			side.want = ""
+			side.move(0, m.filesRows())
+		}
 		return m, nil
 
 	case filesDoneMsg:

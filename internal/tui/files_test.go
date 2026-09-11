@@ -150,12 +150,17 @@ func TestBrowserWalksTheFarSide(t *testing.T) {
 		t.Fatal("tab did not move to the host")
 	}
 
-	// logs is first, directories before files.
-	send(m, " ") // mark it, which also steps down
+	// The way up is first, then the directories, then the files. It cannot be
+	// marked, because it is a door rather than a file.
+	send(m, " ")
+	if len(m.files.far.marked) != 0 {
+		t.Fatal("the way up was marked")
+	}
+	send(m, "down", " ")
 	if len(m.files.far.marked) != 1 {
 		t.Fatal("space did not mark")
 	}
-	m.files.far.cursor = 0
+	m.files.far.cursor = 1 // logs
 
 	_, cmd := m.Update(key("enter"))
 	drain(m, cmd)
@@ -219,7 +224,7 @@ func TestCopyAsksAndThenCopies(t *testing.T) {
 func TestCopyFromTheHostGoesTheOtherWay(t *testing.T) {
 	m, r, _ := browser(t)
 	send(m, "tab")
-	m.files.far.cursor = 1 // notes.txt
+	m.files.far.cursor = 2 // notes.txt, after the way up and the logs directory
 
 	_, cmd := m.Update(key("c"))
 	drain(m, cmd)
@@ -238,6 +243,7 @@ func TestCopyFromTheHostGoesTheOtherWay(t *testing.T) {
 // TestDeleteAsksOnBothSides guards the one action that cannot be undone.
 func TestDeleteAsksOnBothSides(t *testing.T) {
 	m, _, dir := browser(t)
+	send(m, "down") // past the way up, onto the first real name
 
 	_, cmd := m.Update(key("d"))
 	drain(m, cmd)
@@ -253,7 +259,7 @@ func TestDeleteAsksOnBothSides(t *testing.T) {
 	}
 
 	// And on the far side it goes through the connection rather than the disk.
-	send(m, "tab")
+	send(m, "tab", "down")
 	_, cmd = m.Update(key("d"))
 	drain(m, cmd)
 	send(m, "y")
@@ -306,5 +312,51 @@ func TestBrowserFitsTheTerminal(t *testing.T) {
 		if len(lines) > size[1] {
 			t.Errorf("the browser is %d lines at %dx%d", len(lines), size[0], size[1])
 		}
+	}
+}
+
+// TestTheWayUpIsOnScreen is what a real session found missing: u and backspace
+// walk out of a directory, but nothing said so and a pointer had nowhere to
+// click.
+func TestTheWayUpIsOnScreen(t *testing.T) {
+	m, _, _ := browser(t)
+
+	if got := m.files.far.entries[0].Name; got != ".." {
+		t.Errorf("the host side opens on %q, want the way up first", got)
+	}
+	if got := m.files.local.entries[0].Name; got != ".." {
+		t.Errorf("this side opens on %q, want the way up first", got)
+	}
+	if !strings.Contains(m.View(), "../") {
+		t.Errorf("the way up is not drawn:\n%s", m.View())
+	}
+
+	// Walking out of a directory leaves the cursor standing on it.
+	send(m, "tab", "down") // onto logs
+	_, cmd := m.Update(key("enter"))
+	drain(m, cmd)
+	if m.files.far.dir != "/home/hieuny/logs" {
+		t.Fatalf("enter went to %q", m.files.far.dir)
+	}
+
+	_, cmd = m.Update(key("enter")) // the way up is under the cursor again
+	drain(m, cmd)
+	if m.files.far.dir != "/home/hieuny" {
+		t.Fatalf("the way up went to %q", m.files.far.dir)
+	}
+	if e, _ := m.files.far.at(); e.Name != "logs" {
+		t.Errorf("coming back left the cursor on %q, want the directory just left", e.Name)
+	}
+}
+
+// TestARootHasNoWayUp checks that the row is not drawn where it would lead
+// nowhere.
+func TestARootHasNoWayUp(t *testing.T) {
+	list := []remote.Entry{{Name: "etc", IsDir: true}}
+	if got := withParent("/", list, false); len(got) != 1 {
+		t.Errorf("a root was given a way up: %v", got[0].Name)
+	}
+	if got := withParent("/home", list, false); got[0].Name != ".." {
+		t.Errorf("a directory below the root has no way up: %v", got[0].Name)
 	}
 }

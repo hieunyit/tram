@@ -327,7 +327,7 @@ opens the folder, the same as the import screen's.
 
 **Files.** `f` opens a two-pane browser: this machine on the left, the host on
 the right. `tab` moves between them, `enter` walks into a directory and `u`
-comes back, `space` marks, `c` copies what is marked to the other side, `n`
+or the `..` at the top of each side comes back, `space` marks, `c` copies what is marked to the other side, `n`
 makes a folder, `r` renames, `d` deletes, `.` shows the hidden names and `esc`
 closes the connection and goes back. Every copy and every delete asks first, and
 says which side it is about to touch.

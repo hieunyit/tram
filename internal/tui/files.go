@@ -27,6 +27,10 @@ type filePane struct {
 	cursor  int
 	offset  int
 	marked  map[string]bool
+	// want is the name to put the cursor on once the next listing arrives. It
+	// is how walking out of a directory leaves you standing on it rather than
+	// at the top of a list of its neighbours.
+	want string
 }
 
 func (p *filePane) at() (remote.Entry, bool) {
@@ -38,20 +42,42 @@ func (p *filePane) at() (remote.Entry, bool) {
 
 // selection is what an action applies to: the marks, or the row under the
 // cursor when there are none, which is the same rule the host list follows.
+//
+// The way up is never part of it. It is a door, not a file, and copying or
+// deleting the directory you are standing in is not what anybody meant.
 func (p *filePane) selection() []remote.Entry {
 	if len(p.marked) == 0 {
-		if e, ok := p.at(); ok {
+		if e, ok := p.at(); ok && !isParent(e) {
 			return []remote.Entry{e}
 		}
 		return nil
 	}
 	var out []remote.Entry
 	for _, e := range p.entries {
-		if p.marked[e.Name] {
+		if p.marked[e.Name] && !isParent(e) {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+// isParent reports whether an entry is the way out of this directory.
+func isParent(e remote.Entry) bool { return e.Name == ".." }
+
+// withParent puts the way up at the top of a listing.
+//
+// Neither side lists it: ls -A leaves it out and so does the local read. Nor
+// should the keyboard be the only way out of a directory, so the row is put
+// there, first, everywhere except a root that has nothing above it.
+func withParent(dir string, list []remote.Entry, local bool) []remote.Entry {
+	atRoot := dir == "/" || dir == ""
+	if local {
+		atRoot = filepath.Dir(dir) == dir
+	}
+	if atRoot {
+		return list
+	}
+	return append([]remote.Entry{{Name: "..", IsDir: true}}, list...)
 }
 
 func (p *filePane) move(d, height int) {
@@ -235,7 +261,7 @@ func (m *Model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.openDir(f.onFar, "..")
 
 	case " ":
-		if e, ok := side.at(); ok {
+		if e, ok := side.at(); ok && !isParent(e) {
 			if side.marked[e.Name] {
 				delete(side.marked, e.Name)
 			} else {
@@ -250,7 +276,7 @@ func (m *Model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.openMkdirForm()
 	case "r":
-		if e, ok := side.at(); ok {
+		if e, ok := side.at(); ok && !isParent(e) {
 			m.openRenameForm(e.Name)
 		}
 	case "d":
@@ -265,15 +291,22 @@ func (m *Model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openDir walks into a directory on one side.
+// openDir walks into a directory on one side, or out of this one.
 func (m *Model) openDir(far bool, name string) tea.Cmd {
 	f := m.files
+	side := &f.local
+	if far {
+		side = &f.far
+	}
+	// Going up lands on the directory just left, which is where the eye is.
+	if name == ".." {
+		side.want = path.Base(strings.ReplaceAll(side.dir, `\`, "/"))
+	}
 	if far {
 		f.busy = "reading " + name
 		return m.farCmd(name)
 	}
-	next := filepath.Join(f.local.dir, name)
-	return m.localCmd(next)
+	return m.localCmd(filepath.Join(f.local.dir, name))
 }
 
 // filesRows is how many rows of names each side shows.
@@ -489,9 +522,14 @@ func (m *Model) fileRow(e remote.Entry, p *filePane, sel bool, w int) string {
 	if sel {
 		bar = m.st.rowBar.Render(m.gl.bar)
 	}
-	box := m.st.onRow(m.st.unmarked, sel).Render(m.gl.unmarked)
-	if p.marked[e.Name] {
-		box = m.st.onRow(m.st.marked, sel).Render(m.gl.marked)
+	// The way up carries no box: there is nothing about it to mark, and a box
+	// invites a click that would do nothing.
+	box := " "
+	if !isParent(e) {
+		box = m.st.onRow(m.st.unmarked, sel).Render(m.gl.unmarked)
+		if p.marked[e.Name] {
+			box = m.st.onRow(m.st.marked, sel).Render(m.gl.marked)
+		}
 	}
 
 	name := e.Name
@@ -499,6 +537,8 @@ func (m *Model) fileRow(e remote.Entry, p *filePane, sel bool, w int) string {
 	switch {
 	case sel:
 		style = m.st.selected
+	case isParent(e):
+		style = m.st.onRow(m.st.faint, sel)
 	case e.IsDir:
 		style = m.st.onRow(m.st.ok, sel)
 	case e.Link != "":
