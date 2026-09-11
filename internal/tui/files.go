@@ -278,6 +278,8 @@ func (m *Model) updateFiles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		if e, ok := side.at(); ok && !isParent(e) {
 			m.openRenameForm(e.Name)
+		} else {
+			f.problem = ".. is the way out, not a name to change"
 		}
 	case "d":
 		return m.confirmFileDelete()
@@ -321,8 +323,12 @@ func (m *Model) copySelection() (tea.Model, tea.Cmd) {
 	}
 	items := side.selection()
 	if len(items) == 0 {
+		// The cursor sits on the way up when a directory opens, and a key that
+		// does nothing at all reads as a key that is broken.
+		f.problem = "nothing to copy; move off .. or mark something with space"
 		return m, nil
 	}
+	f.problem = ""
 
 	var jobs []remote.Copy
 	for _, e := range items {
@@ -374,8 +380,10 @@ func (m *Model) confirmFileDelete() (tea.Model, tea.Cmd) {
 	}
 	items := side.selection()
 	if len(items) == 0 {
+		f.problem = "nothing to delete; move off .. or mark something with space"
 		return m, nil
 	}
+	f.problem = ""
 
 	var names []string
 	for _, e := range items {

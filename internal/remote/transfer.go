@@ -29,12 +29,21 @@ type Copy struct {
 
 // Argv builds the scp command line.
 //
-// The remote path is quoted twice on purpose. scp hands its remote argument to
-// a shell on the far end, so a name with a space in it arrives as two names
-// unless it carries quotes of its own, and the quotes have to survive the local
-// shell first. This is scp's oldest sharp edge.
-func (c Copy) Argv(configPath string) []string {
+// The quoting of the far path depends on which protocol scp is speaking, and
+// getting it backwards is the difference between a copied file and a complaint
+// about a file whose name contains a quotation mark.
+//
+// OpenSSH 8.7 and later can be told to move the file over SFTP with -s, and
+// there the path is taken exactly as written: quoting it would make the quotes
+// part of the name. Older scp hands the path to a shell on the far side, where
+// an unquoted space splits it in two and an unquoted $(...) is a command that
+// runs on the host. So: -s and bare, or nothing and quoted, and never the two
+// crossed over.
+func (c Copy) Argv(configPath string, overSFTP bool) []string {
 	argv := []string{"scp"}
+	if overSFTP {
+		argv = append(argv, "-s")
+	}
 	if configPath != "" {
 		argv = append(argv, "-F", configPath)
 	}
@@ -45,7 +54,11 @@ func (c Copy) Argv(configPath string) []string {
 	// is drawing on.
 	argv = append(argv, "-p", "-q")
 
-	far := c.Host + ":" + Quote(c.Remote)
+	remote := c.Remote
+	if !overSFTP {
+		remote = Quote(remote)
+	}
+	far := c.Host + ":" + remote
 	if c.Up {
 		return append(argv, c.Local, far)
 	}
@@ -53,19 +66,44 @@ func (c Copy) Argv(configPath string) []string {
 }
 
 // Run performs the copy and returns whatever scp complained about.
+//
+// It asks for the SFTP protocol first and falls back once, because the two
+// protocols need opposite quoting and the only reliable way to know which scp
+// is installed is to ask it.
 func (c Copy) Run(configPath string, env []string) error {
-	argv := c.Argv(configPath)
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Env = env
-
-	out, err := cmd.CombinedOutput()
+	out, err := c.attempt(configPath, env, true)
 	if err == nil {
 		return nil
 	}
-	if msg := firstComplaint(strings.Split(string(out), "\n")); msg != "no answer" {
+	if looksUnsupported(out) {
+		if _, err2 := c.attempt(configPath, env, false); err2 == nil {
+			return nil
+		} else {
+			return err2
+		}
+	}
+	if msg := firstComplaint(strings.Split(out, "\n")); msg != "no answer" {
 		return fmt.Errorf("%s", msg)
 	}
 	return err
+}
+
+func (c Copy) attempt(configPath string, env []string, overSFTP bool) (string, error) {
+	argv := c.Argv(configPath, overSFTP)
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// looksUnsupported reports whether scp refused the flag rather than the file,
+// which is how an older one answers -s.
+func looksUnsupported(out string) bool {
+	low := strings.ToLower(out)
+	return strings.Contains(low, "unknown option") ||
+		strings.Contains(low, "illegal option") ||
+		strings.Contains(low, "invalid option") ||
+		strings.HasPrefix(low, "usage:")
 }
 
 // Describe says what a transfer is about to do, for the line that asks whether
