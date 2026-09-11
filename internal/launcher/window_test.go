@@ -106,7 +106,7 @@ func TestWindowsAlwaysHasSomewhereToPutAWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"cmd.exe", "/c", "start", "web1", `C:\tram.exe`, "web1"}
+	want := []string{"cmd.exe", "/c", "start", "web1 ", `C:\tram.exe`, "web1"}
 	for i := range want {
 		if argv[i] != want[i] {
 			t.Fatalf("the console window command is %v, want %v", argv, want)
@@ -114,17 +114,29 @@ func TestWindowsAlwaysHasSomewhereToPutAWindow(t *testing.T) {
 	}
 }
 
-// TestATitleComesBeforeTheProgram guards start's oldest trap: without a title
-// it reads a quoted program path as one and opens an empty window.
-func TestATitleComesBeforeTheProgram(t *testing.T) {
+// TestTheTitleIsQuotedOrItIsAProgram is the dialog box a real session got:
+// "Windows cannot find vpb-fs100".
+//
+// start tells a title from a program by the quotes around it. Go quotes an
+// argument only when it contains a space, so a bare host name reached start
+// unquoted and was read as the program to run. The trailing space is what makes
+// Go quote it, and there is no other way to ask for quotes.
+func TestTheTitleIsQuotedOrItIsAProgram(t *testing.T) {
 	argv, err := WindowCommand(TermConhost, `C:\Program Files\tram.exe`, "web1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if argv[3] != "web1" {
-		t.Errorf("the argument after start is %q, which start will read as the title", argv[3])
+	title := argv[3]
+	if !strings.HasSuffix(title, " ") {
+		t.Errorf("the title is %q, which Go passes unquoted and start runs as a program", title)
+	}
+	if strings.TrimSpace(title) != "web1" {
+		t.Errorf("the title is %q", title)
 	}
 	if argv[4] != `C:\Program Files\tram.exe` {
 		t.Errorf("the program is %q", argv[4])
+	}
+	if argv[5] != "web1" {
+		t.Errorf("the host handed to tram is %q", argv[5])
 	}
 }

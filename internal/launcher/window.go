@@ -164,10 +164,12 @@ func WindowCommand(t Terminal, self, host string, override []string) ([]string, 
 		}
 		return []string{"wt.exe", "-w", where, "new-tab", "--title", host, self, host}, nil
 	case TermConhost:
-		// start takes a window title first. Without one it reads a quoted
-		// program path as the title and opens an empty window instead, which
-		// is its oldest trap.
-		return []string{"cmd.exe", "/c", "start", host, self, host}, nil
+		// start tells a title from a program by the quotes around it, and Go
+		// quotes an argument only when it holds a space. An unquoted host name
+		// was therefore read as the program to run, and Windows answered that
+		// it could not find it. The trailing space is what puts the quotes
+		// there, and the title is what they were for.
+		return []string{"cmd.exe", "/c", "start", host + " ", self, host}, nil
 	case TermTmux:
 		return []string{"tmux", "new-window", "-n", host, self + " " + host}, nil
 	case TermITerm, TermApple:
