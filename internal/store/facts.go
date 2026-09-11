@@ -34,11 +34,19 @@ type Fact struct {
 	Millis int64  `json:"ms,omitempty"`
 	At     int64  `json:"at,omitempty"`
 
-	// The three facts that only a command on the machine itself can answer.
-	// They are empty until something has run there.
+	// Detail is the line ssh itself wrote when the probe failed, and Explain
+	// what that class of failure means. Both are kept so that the interface can
+	// say what went wrong without probing the host again to find out.
+	Detail  string `json:"detail,omitempty"`
+	Explain string `json:"explain,omitempty"`
+
+	// The facts that only a command on the machine itself can answer. They are
+	// empty until something has run there.
 	OS      string `json:"os,omitempty"`
 	Load    string `json:"load,omitempty"`
 	Uptime  string `json:"uptime,omitempty"`
+	Disk    string `json:"disk,omitempty"`
+	RAM     string `json:"ram,omitempty"`
 	FactsAt int64  `json:"facts_at,omitempty"`
 
 	// Samples are the last measurements, oldest first, which is what the
@@ -75,6 +83,20 @@ type factsFile struct {
 
 // Reachable reports whether the last measurement got through.
 func (f Fact) Reachable() bool { return f.Class == "OK" }
+
+// Full reports whether a percentage reading has passed a threshold worth
+// colouring. It takes the readings as they are written, "83%", because that is
+// how the machine said them.
+func Full(pct string, at int) bool {
+	n := 0
+	for _, r := range pct {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n >= at
+}
 
 // Slow reports whether the host answered, but not quickly.
 func (f Fact) Slow() bool { return f.Reachable() && f.Millis >= SlowMillis }
@@ -129,8 +151,9 @@ func (s *Store) PutFacts(measured map[string]Fact) error {
 		// A measurement that did not run a command on the machine leaves the
 		// facts alone rather than blanking them: the last known operating
 		// system is better than nothing, as long as its age is kept.
-		if f.OS == "" && f.Load == "" && f.Uptime == "" {
-			f.OS, f.Load, f.Uptime, f.FactsAt = old.OS, old.Load, old.Uptime, old.FactsAt
+		if f.OS == "" && f.Load == "" && f.Uptime == "" && f.Disk == "" && f.RAM == "" {
+			f.OS, f.Load, f.Uptime = old.OS, old.Load, old.Uptime
+			f.Disk, f.RAM, f.FactsAt = old.Disk, old.RAM, old.FactsAt
 		} else {
 			f.FactsAt = now
 		}

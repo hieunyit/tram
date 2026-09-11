@@ -25,13 +25,19 @@ type Measurement struct {
 	Class  string
 	OK     bool
 	Millis int64
-	// The three facts only a command on the machine can answer. They stay empty
-	// when the host answered but had nothing to run, which is what a network
-	// device does.
+	// The facts only a command on the machine can answer. They stay empty when
+	// the host answered but had nothing to run, which is what a network device
+	// does.
 	OS     string
 	Load   string
 	Uptime string
-	Detail string
+	Disk   string
+	RAM    string
+
+	// Detail is the line ssh wrote when this failed, and Explain what that kind
+	// of failure means.
+	Detail  string
+	Explain string
 }
 
 // tab is which of the three views is showing. The design has a fourth, tunnels,
@@ -147,11 +153,15 @@ func (m *Model) measure(hosts []model.Host) tea.Cmd {
 		up, down := 0, 0
 		for _, x := range out {
 			facts[x.Host] = store.Fact{
-				Class:  x.Class,
-				Millis: x.Millis,
-				OS:     x.OS,
-				Load:   x.Load,
-				Uptime: x.Uptime,
+				Class:   x.Class,
+				Millis:  x.Millis,
+				Detail:  x.Detail,
+				Explain: x.Explain,
+				OS:      x.OS,
+				Load:    x.Load,
+				Uptime:  x.Uptime,
+				Disk:    x.Disk,
+				RAM:     x.RAM,
 			}
 			if x.OK {
 				up++

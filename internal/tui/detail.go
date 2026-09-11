@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/hieuny/tram/internal/model"
 	"github.com/hieuny/tram/internal/store"
@@ -62,14 +63,23 @@ func (m *Model) detailPaneLines(height, w, x, y int) []string {
 	add(title, m.st.faint.Render(pad(userHost(h)+":"+h.PortOr(), w)), m.hrule(w))
 
 	// How you reach it.
+	//
+	// A field with nothing in it is drawn only when its absence changes what
+	// ssh does: no user means your local login, no jump means straight there.
+	// The rest are left out, because a column of dashes is a row of the pane
+	// each and the pane is twenty-two rows tall.
 	var conn []string
 	conn = append(conn,
 		label("address", h.Addr(), plain),
 		label("user", h.User, plain),
 		label("auth", authOf(h), func(s string) string { return m.st.ok.Render(s) }),
-		label("identity", shortenPath(strings.Join(h.IdentityFiles, ", ")), plain),
-		label("proxyjump", h.ProxyJump, plain),
-		label("group", h.Group, plain))
+		label("proxyjump", h.ProxyJump, plain))
+	if len(h.IdentityFiles) > 0 {
+		conn = append(conn, label("identity", shortenPath(strings.Join(h.IdentityFiles, ", ")), plain))
+	}
+	if h.Group != "" {
+		conn = append(conn, label("group", h.Group, plain))
+	}
 	if len(h.Tags) > 0 {
 		conn = append(conn, label("tags", strings.Join(h.Tags, " "), func(s string) string { return m.st.tag.Render(s) }))
 	}
@@ -83,55 +93,50 @@ func (m *Model) detailPaneLines(height, w, x, y int) []string {
 	if h.Desc != "" {
 		conn = append(conn, label("desc", h.Desc, plain))
 	}
-	if chain := m.inv.Chain(h.Name); len(chain.Cycle) > 0 {
-		conn = append(conn, "", m.st.bad.Render(pad("loop: "+strings.Join(chain.Cycle, " "+m.gl.arrow+" "), w)))
-	} else if len(chain.Hops) > 0 {
-		var route []string
-		for _, hop := range chain.Hops {
-			route = append(route, hop.Spec)
+	// Which file and which line. With ssh_config split across Include files,
+	// this is the difference between editing a host and hunting for it.
+	conn = append(conn, label("source", fmt.Sprintf("%s:%d", shortenPath(h.File), h.Line), func(s string) string {
+		if h.ReadOnly {
+			return m.st.faint.Render(s)
 		}
-		route = append(route, h.Name)
-		conn = append(conn, label("route", strings.Join(route, " "+m.gl.arrow+" "), plain))
+		return m.st.faint.Render(s)
+	}))
+	// What breaks if this one does. One line rather than a section: it belongs
+	// with the rest of what the file says about this host, and for a jump
+	// station it is the most important line on the screen.
+	if deps := model.Names(model.Dependents(h.Name, m.hosts)); len(deps) > 0 {
+		list := strings.Join(deps, ", ")
+		if len(deps) > 3 {
+			list = fmt.Sprintf("%s +%d", strings.Join(deps[:3], ", "), len(deps)-3)
+		}
+		conn = append(conn, label("used by", list, func(s string) string { return m.st.warn.Render(s) }))
 	}
-	add(m.heading("connection"), "")
+	if chain := m.inv.Chain(h.Name); len(chain.Cycle) > 0 {
+		conn = append(conn, m.st.bad.Render(pad("loop: "+strings.Join(chain.Cycle, " "+m.gl.arrow+" "), w)))
+	}
+	add(m.heading("connection"))
 	add(conn...)
 
-	// Whether it has been answering.
-	reach := []string{"", "", ""}
-	if bars := m.sampleBars(f.Samples, w); bars != "" {
-		reach[2] = bars
-	} else {
-		reach[2] = m.st.faint.Render("press p to measure this host")
-	}
-	pct, samples := f.Uptime24h()
-	right := m.st.faint.Render("not measured")
-	if samples > 0 {
-		right = m.st.ok.Render(fmt.Sprintf("%d%% of %d", pct, samples))
-	}
-	reach[0] = m.spreadIn(w, m.heading("reachability"), right)
 	tiles := m.tiles(w, f)
-	if f.Uptime != "" {
-		tiles = append(tiles, m.st.label.Render(pad("uptime", 11))+" "+m.st.value.Render(pad(f.Uptime, max(1, w-12))))
-	}
-	if fits(len(reach) + len(tiles) + 2) {
+
+	// Why it can or cannot be reached. This is a reading of the last probe
+	// rather than a chart of many: tram measures when you ask it to, so a
+	// series over time is a series of two or three points, and what actually
+	// helps is the last answer said in words.
+	// The readings are dropped before the diagnosis is: a number about a
+	// machine is worth less than the sentence saying whether you can reach it.
+	diag := m.diagnosis(h, f, w)
+	switch {
+	case fits(len(diag) + len(tiles) + 3):
 		add(m.hrule(w))
-		add(reach...)
+		add(m.spreadIn(w, m.heading("diagnosis"), m.st.faint.Render(measuredAgo(f))))
+		add(diag...)
 		add("")
 		add(tiles...)
-	}
-
-	// What has happened to it lately.
-	events := m.inv.Store.Events(h.Name)
-	var recent []string
-	if len(events) == 0 {
-		recent = append(recent, m.st.faint.Render("nothing recorded yet"))
-	}
-	for _, e := range events {
-		recent = append(recent, m.st.faint.Render(pad(ago(e.At), 10))+" "+m.st.value.Render(pad(e.What, max(1, w-11))))
-	}
-	if fits(len(recent) + 3) {
-		add(m.hrule(w), m.heading("recent"), "")
-		add(recent...)
+	case fits(len(diag) + 2):
+		add(m.hrule(w))
+		add(m.spreadIn(w, m.heading("diagnosis"), m.st.faint.Render(measuredAgo(f))))
+		add(diag...)
 	}
 
 	// What you can do about it, pinned to the foot of the pane.
@@ -145,24 +150,175 @@ func (m *Model) detailPaneLines(height, w, x, y int) []string {
 	return out
 }
 
-// tiles are the three readings the design boxes off: round trip, load average
-// and operating system. They stay empty until something has run on the machine,
-// because a dash is honest and a zero is not.
-func (m *Model) tiles(w int, f store.Fact) []string {
-	cell := (w - 2) / 3
-	names := []string{"RTT", "LOAD", "SYSTEM"}
-	values := []string{rttText(f), f.Load, f.OS}
-
-	var top, bottom []string
-	for i, n := range names {
-		v := values[i]
-		if v == "" {
-			v = "-"
+// diagnosis is the last probe said in words: what happened, what ssh itself
+// wrote about it, and where along the route it happened.
+func (m *Model) diagnosis(h model.Host, f store.Fact, w int) []string {
+	if !f.Measured() {
+		return []string{
+			m.st.faint.Render(pad("not measured yet", w)),
+			m.st.faint.Render(pad("press p to measure this host, P for all of them", w)),
 		}
-		top = append(top, m.st.section.Render(pad(n, cell)))
-		bottom = append(bottom, m.st.bright.Render(pad(v, cell)))
 	}
-	return []string{strings.Join(top, " "), strings.Join(bottom, " ")}
+
+	var out []string
+	head := m.healthStyle(healthOf(f)).Render(strings.ToLower(f.Class))
+	if f.Reachable() {
+		head += m.st.faint.Render("  "+m.gl.dot+"  ") + m.st.value.Render(fmt.Sprintf("%d ms", f.Millis))
+		if f.Slow() {
+			head += m.st.warn.Render("  (slow)")
+		}
+	}
+	out = append(out, head)
+
+	// What the failure means, then the line ssh wrote. The explanation first,
+	// because it is the part that says where to go and look.
+	if f.Explain != "" {
+		out = append(out, wrapTo(f.Explain, w, 2, m.st.dim)...)
+	}
+	if f.Detail != "" {
+		out = append(out, wrapTo(f.Detail, w, 2, m.st.faint)...)
+	}
+
+	// Every hop of the route carries its own last reading, so a destination
+	// that times out behind a station that is down explains itself without
+	// anything being probed again.
+	if chain := m.inv.Chain(h.Name); len(chain.Hops) > 0 {
+		var parts []string
+		for _, hop := range chain.Hops {
+			parts = append(parts, m.hopState(hop.Spec))
+		}
+		parts = append(parts, m.hopState(h.Name))
+		out = append(out, "", m.st.label.Render(pad("route", w)))
+		out = append(out, wrapTo(strings.Join(parts, " "+m.gl.arrow+" "), w, 2, m.st.row)...)
+		out = append(out, m.st.faint.Render(pad("press D to walk it one station at a time", w)))
+	}
+
+	// The chart earns its line only once there is a series to draw. One bar is
+	// not a history, it is a single reading drawn sideways.
+	if len(f.Samples) >= 5 {
+		pct, n := f.Uptime24h()
+		out = append(out, "", m.spreadIn(w, m.sampleBars(f.Samples, w-12),
+			m.st.faint.Render(fmt.Sprintf("%d%% of %d", pct, n))))
+	}
+	return out
+}
+
+// hopState names one station along a route and what was last known of it.
+func (m *Model) hopState(spec string) string {
+	name := spec
+	if i := strings.LastIndex(name, "@"); i >= 0 {
+		name = name[i+1:]
+	}
+	f := m.fact(name)
+	mark := m.gl.dot
+	switch healthOf(f) {
+	case healthUp, healthSlow:
+		mark = m.gl.check
+	case healthDown:
+		mark = m.gl.cross
+	}
+	return m.st.row.Render(name) + m.healthStyle(healthOf(f)).Render(" "+mark)
+}
+
+// measuredAgo says how old the reading is, because a green host measured on
+// Tuesday is not a green host.
+func measuredAgo(f store.Fact) string {
+	if !f.Measured() {
+		return ""
+	}
+	return ago(f.At)
+}
+
+// wrapTo breaks a sentence across the pane, indented under itself, and gives up
+// after a few lines rather than filling the pane with one long error.
+func wrapTo(s string, w, maxLines int, style lipgloss.Style) []string {
+	var out []string
+	for _, line := range wrapWords(s, w) {
+		if len(out) == maxLines {
+			out[len(out)-1] = style.Render(pad(runewidth.Truncate(line, w, "…"), w))
+			break
+		}
+		out = append(out, style.Render(pad(line, w)))
+	}
+	return out
+}
+
+func wrapWords(s string, w int) []string {
+	if w < 8 {
+		return []string{s}
+	}
+	var out []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		switch {
+		case line == "":
+			line = word
+		case runewidth.StringWidth(line)+1+runewidth.StringWidth(word) <= w:
+			line += " " + word
+		default:
+			out = append(out, line)
+			line = word
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
+}
+
+// tiles are the readings the design boxes off, three to a row: the round trip,
+// the load, how full the disk and the memory are, and what the machine is. They
+// stay empty until something has run there, because a dash is honest and a zero
+// is not.
+func (m *Model) tiles(w int, f store.Fact) []string {
+	type tile struct {
+		name, value string
+		style       lipgloss.Style
+	}
+	full := func(pct string) lipgloss.Style {
+		switch {
+		case store.Full(pct, 90):
+			return m.st.bad
+		case store.Full(pct, 75):
+			return m.st.warn
+		}
+		return m.st.bright
+	}
+
+	tiles := []tile{
+		{"RTT", rttText(f), m.st.bright},
+		{"LOAD", f.Load, m.st.bright},
+		{"DISK", f.Disk, full(f.Disk)},
+		{"RAM", f.RAM, full(f.RAM)},
+		{"SYSTEM", f.OS, m.st.bright},
+	}
+	if f.Uptime != "" {
+		tiles = append(tiles, tile{"UP", f.Uptime, m.st.bright})
+	}
+
+	// Four to a row rather than the design's three: a terminal row is an
+	// expensive thing and every one of these fits in nine columns.
+	const perRow = 4
+	cell := (w - perRow + 1) / perRow
+
+	var out []string
+	for i := 0; i < len(tiles); i += perRow {
+		end := min(i+perRow, len(tiles))
+		var top, bottom []string
+		for _, t := range tiles[i:end] {
+			v := t.value
+			if v == "" {
+				v = "-"
+			}
+			top = append(top, m.st.section.Render(pad(t.name, cell)))
+			bottom = append(bottom, t.style.Render(pad(v, cell)))
+		}
+		if i > 0 {
+			out = append(out, "")
+		}
+		out = append(out, strings.Join(top, " "), strings.Join(bottom, " "))
+	}
+	return out
 }
 
 func rttText(f store.Fact) string {

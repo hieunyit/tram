@@ -191,8 +191,9 @@ press `w` to write it.
 ├── accounts.json             identities, and which host is linked to which
 ├── snippets.json             saved commands
 ├── history.json              last connected, and pinned hosts
-├── facts.json                what the last measurements found: latency, load,
-│                             system, and the recent activity per host
+├── facts.json                what the last measurements found: the round trip,
+│                             the failure when there was one, and the load,
+│                             disk, memory and system of each host
 └── config.toml               tram's own options
 
 ```
@@ -266,18 +267,32 @@ moves every host linked to it.
 
 `1`, `2` and `3` switch between the three tabs, and so does clicking them.
 
-**Measuring.** Nothing in the latency column, the reachability chart or the
-RTT, LOAD and SYSTEM readings is a guess. `p` measures the selection and `P`
-measures everything shown: one ssh connection per host, which times the round
-trip and, in the same connection, runs `uname -sr` and `uptime`. A host that
-answers but has neither command, such as a switch, counts as reachable and
-leaves those fields empty. What comes back is written to `facts.json`, so the
-chart of the last thirty measurements and the fleet's health survive a restart
-and mean something on the second run. A host nobody has measured shows a dash,
-never a zero.
+**Measuring.** Nothing in the latency column or the readings under it is a
+guess. `p` measures the selection and `P` measures everything shown: one ssh
+connection per host, which times the round trip and, in the same connection,
+asks the machine what it is, how loaded it is, and how full its disk and memory
+are. Every one of those is a read. A host that answers but has none of those
+commands, such as a switch, counts as reachable and leaves the fields empty. A
+host nobody has measured shows a dash, never a zero.
 
-The sweep runs off the main loop, so the interface stays usable while hundreds
-of connections are attempted, and the bar says how many are still going.
+What comes back is written to `facts.json`, so it is still there on the next
+run. The sweep itself runs off the main loop, so the interface stays usable
+while hundreds of connections are attempted, and the bar says how many are
+still going. What the last sweep found sits in the bar along the bottom: so
+many up, so many slow, so many down.
+
+**The diagnosis** is the second half of the details pane, and it is a reading
+rather than a chart. tram measures when you ask it to, so a series over time is
+a series of two or three points; what helps instead is the last answer said in
+words. It names the class of failure, explains what that class means, prints
+the line ssh itself wrote, and draws the route with each station's own last
+reading beside it. A destination that times out behind a station that is
+refusing connections therefore explains itself, without anything being probed
+again. `D` walks the route one station at a time when that is not enough.
+
+The line that matters most on a jump station is in the block above it: **used
+by** names the hosts that route through this one, so what breaks if it does is
+on the screen before you delete or rename it.
 
 The bar at the top also says what the ssh agent is holding. That reading is
 `ssh-add -l` and its exit status, asked once when the interface opens; the keys

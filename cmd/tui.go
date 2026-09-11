@@ -133,11 +133,12 @@ func (r *tuiRunner) opts() (runner.Options, probe.Options) {
 
 // factsCommand is what tram runs on the far end to fill in the details pane.
 //
-// It is two ordinary commands and nothing else: no script, no temporary file,
-// no assumption about the shell beyond running one line. A host that has
-// neither, such as a switch, still answers the connection, and the parse simply
-// finds nothing.
-const factsCommand = "uname -sr 2>/dev/null; uptime 2>/dev/null"
+// They are four ordinary commands and nothing else: no script, no temporary
+// file, no assumption about the shell beyond running one line. A host that has
+// none of them, such as a switch, still answers the connection, and the parse
+// simply finds nothing. Every one of them is a read.
+const factsCommand = "uname -sr 2>/dev/null; uptime 2>/dev/null; " +
+	"df -P / 2>/dev/null | tail -1; free -m 2>/dev/null | sed -n 2p"
 
 // Measure probes hosts and, in the same connection, asks each one what it is
 // and how loaded it is.
@@ -163,7 +164,10 @@ func (r *tuiRunner) Measure(hosts []model.Host) []tui.Measurement {
 			Detail: probeSummary(x),
 		}
 		if mm.OK {
-			mm.OS, mm.Uptime, mm.Load = parseFacts(x.Output)
+			mm.OS, mm.Uptime, mm.Load, mm.Disk, mm.RAM = parseFacts(x.Output)
+		} else {
+			mm.Detail = x.Detail
+			mm.Explain = x.Class.Explain()
 		}
 		out[i] = mm
 	}
@@ -214,13 +218,14 @@ func probeSummary(x probe.Result) string {
 // Both commands vary between systems, so this looks for the shapes they agree
 // on and gives up quietly on the rest: an empty field is drawn as a dash, which
 // is better than a wrong reading.
-func parseFacts(output string) (os, up, load string) {
+func parseFacts(output string) (os, up, load, disk, ram string) {
 	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if strings.Contains(line, " up ") || strings.Contains(line, "load average") {
+		switch {
+		case strings.Contains(line, " up ") || strings.Contains(line, "load average"):
 			u, l := parseUptime(line)
 			if u != "" {
 				up = u
@@ -228,15 +233,47 @@ func parseFacts(output string) (os, up, load string) {
 			if l != "" {
 				load = l
 			}
-			continue
-		}
-		if os == "" {
-			// uname -sr writes one line and nothing else, so the first line
-			// that is not an uptime is it.
+		case strings.HasPrefix(line, "Mem:") || strings.HasPrefix(line, "Mem "):
+			ram = parseMem(line)
+		case strings.HasSuffix(line, " /"):
+			disk = parseDisk(line)
+		case os == "":
+			// uname -sr writes one line and nothing else, so the first line that
+			// is none of the others is it.
 			os = line
 		}
 	}
-	return os, up, load
+	return os, up, load, disk, ram
+}
+
+// parseDisk reads the last line of df -P /, which is the same six fields on
+// every system that has df at all: device, size, used, free, percentage, mount.
+func parseDisk(line string) string {
+	f := strings.Fields(line)
+	if len(f) < 6 {
+		return ""
+	}
+	for _, v := range f {
+		if strings.HasSuffix(v, "%") {
+			return v
+		}
+	}
+	return ""
+}
+
+// parseMem turns the Mem: line of free -m into a percentage, which is the form
+// the reading is worth in a cell four characters wide.
+func parseMem(line string) string {
+	f := strings.Fields(line)
+	if len(f) < 3 {
+		return ""
+	}
+	total, err1 := strconv.Atoi(f[1])
+	used, err2 := strconv.Atoi(f[2])
+	if err1 != nil || err2 != nil || total <= 0 {
+		return ""
+	}
+	return strconv.Itoa(used*100/total) + "%"
 }
 
 // parseUptime pulls how long the machine has been up and its first load figure

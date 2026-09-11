@@ -135,39 +135,15 @@ func (m *Model) toggleGroup() {
 	m.rebuildGroups()
 }
 
-// groupPaneLines draws the pane the design puts on the left: the tree at the
-// top, the fleet's health at the bottom, and whatever room is left between
-// them.
+// groupPaneLines draws the pane the design puts on the left.
+//
+// The design also puts a fleet health chart under the tree. It is not here: the
+// chart is one bar per sweep, tram sweeps when you ask it to, and a chart of two
+// bars is two numbers drawn sideways. The same numbers live in the bar along the
+// bottom, where they cost no room at all.
 func (m *Model) groupPaneLines(height, w, x, y int) []string {
-	// The health block is four lines and a rule, and it is only worth the room
-	// when the pane is tall enough that the tree does not lose by it.
-	healthH := 0
-	if height >= 14 {
-		healthH = 5
-	}
-	treeH := height - healthH - 2
-
 	out := []string{" " + m.heading("groups"), ""}
-	for _, row := range m.groupTreeLines(treeH, w, x, y+2) {
-		out = append(out, row)
-	}
-	if healthH == 0 {
-		return out
-	}
-	for len(out) < height-healthH {
-		out = append(out, "")
-	}
-	out = append(out,
-		" "+m.hrule(w),
-		" "+m.heading("fleet health"),
-		"")
-	if bars := m.fleetBars(w); bars != "" {
-		out = append(out, " "+bars)
-	} else {
-		out = append(out, " "+m.st.faint.Render("press P to measure"))
-	}
-	out = append(out, " "+m.fleetLine())
-	return out
+	return append(out, m.groupTreeLines(height-2, w, x, y+2)...)
 }
 
 // groupTreeLines draws the tree itself, one string per row.

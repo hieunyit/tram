@@ -922,6 +922,22 @@ func (m *Model) statusLine() string {
 	case m.status != "":
 		return m.status
 	}
+	// What the last sweep found, once there has been one. It sits here rather
+	// than in a chart of its own because it is three numbers, and three numbers
+	// are a sentence.
+	if up, slow, down, unknown := m.inv.Store.FleetHealth(model.Names(m.hosts)); unknown < len(m.hosts) {
+		line := fmt.Sprintf("%d up", up)
+		if slow > 0 {
+			line += fmt.Sprintf(" %s %d slow", m.gl.dot, slow)
+		}
+		if down > 0 {
+			line += fmt.Sprintf(" %s %d down", m.gl.dot, down)
+		}
+		if unknown > 0 {
+			line += fmt.Sprintf(" %s %d not measured", m.gl.dot, unknown)
+		}
+		return line + fmt.Sprintf(" %s sorted by %s", m.gl.dot, m.sortKey)
+	}
 	return fmt.Sprintf("ready %s %d hosts indexed %s sorted by %s",
 		m.gl.dot, len(m.hosts), m.gl.dot, m.sortKey)
 }

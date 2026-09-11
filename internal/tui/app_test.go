@@ -19,7 +19,8 @@ type nullRunner struct{}
 func (nullRunner) Measure(hosts []model.Host) []Measurement {
 	out := make([]Measurement, len(hosts))
 	for i, h := range hosts {
-		out[i] = Measurement{Host: h.Name, Class: "OK", OK: true, Millis: int64(3 + i), OS: "Linux 6.1", Load: "0.10", Uptime: "3 days"}
+		out[i] = Measurement{Host: h.Name, Class: "OK", OK: true, Millis: int64(3 + i),
+			OS: "Linux 6.1", Load: "0.10", Uptime: "3 days", Disk: "34%", RAM: "51%"}
 	}
 	return out
 }

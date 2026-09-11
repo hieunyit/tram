@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -288,9 +287,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case measuredMsg:
+		// No note: the standing tally in the bar is the result of the sweep,
+		// and a note saying the same thing in different words would sit on top
+		// of it until the next keystroke.
 		m.measuring = 0
+		m.status = ""
 		m.reload()
-		m.status = fmt.Sprintf("measured %d host(s), %d answered", msg.count, msg.up)
 		return m, nil
 
 	case errMsg:

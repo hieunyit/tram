@@ -168,3 +168,90 @@ func TestTagsAreShownAndSearchable(t *testing.T) {
 		t.Errorf("a #tag search gave %v", got)
 	}
 }
+
+// downRunner reports a fleet where the jump station is refusing connections and
+// everything behind it times out, which is the case the diagnosis exists for.
+type downRunner struct{ nullRunner }
+
+func (downRunner) Measure(hosts []model.Host) []Measurement {
+	out := make([]Measurement, len(hosts))
+	for i, h := range hosts {
+		switch h.Name {
+		case "bastion":
+			out[i] = Measurement{Host: h.Name, Class: "REFUSED", Millis: 8,
+				Detail:  "ssh: connect to host b.example.com port 22: Connection refused",
+				Explain: "the port answered and refused; sshd is probably not running"}
+		case "web1":
+			out[i] = Measurement{Host: h.Name, Class: "JUMP", Millis: 9,
+				Detail:  "ssh: connect to host b.example.com port 22: Connection refused",
+				Explain: "a jump station on the way failed"}
+		default:
+			out[i] = Measurement{Host: h.Name, Class: "OK", OK: true, Millis: 4, OS: "Linux 6.1"}
+		}
+	}
+	return out
+}
+
+// TestDiagnosisSaysWhatWentWrong is what replaced the reachability chart: a
+// chart of two measurements said nothing, and this says where to go and look.
+func TestDiagnosisSaysWhatWentWrong(t *testing.T) {
+	m := newModel(t)
+	m.Runner = downRunner{}
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+
+	_, cmd := m.Update(key("P"))
+	drain(m, cmd)
+
+	// The cursor opens on bastion, the station that refused.
+	out := m.View()
+	// The explanation and the line ssh wrote are both wrapped to the pane, so
+	// the test looks for the parts that survive a line break.
+	for _, want := range []string{
+		"DIAGNOSIS",
+		"refused",
+		"the port answered and refused",
+		"ssh: connect to host b.example.com",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the diagnosis does not say %q:\n%s", want, out)
+		}
+	}
+
+	// web1 routes through it, so its own pane blames the station rather than
+	// the destination, without probing anything again.
+	send(m, "down", "down")
+	if h, _ := m.current(); h.Name != "web1" {
+		t.Fatalf("the cursor is on %q", h.Name)
+	}
+	out = m.View()
+	if !strings.Contains(out, "route") {
+		t.Fatalf("the diagnosis does not draw the route:\n%s", out)
+	}
+	if !strings.Contains(out, "bastion "+m.gl.cross) {
+		t.Errorf("the route does not mark the station that is down:\n%s", out)
+	}
+	if !strings.Contains(out, "press D to walk it") {
+		t.Errorf("the diagnosis does not offer the doctor:\n%s", out)
+	}
+}
+
+// TestUsedByWarnsAboutJumpStations covers the line that replaced the recent
+// list: what breaks if this host does.
+func TestUsedByWarnsAboutJumpStations(t *testing.T) {
+	m := newModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+
+	out := m.View()
+	if !strings.Contains(out, "used by") || !strings.Contains(out, "web1") {
+		t.Errorf("bastion's pane does not say that web1 routes through it:\n%s", out)
+	}
+
+	// A host nothing routes through does not carry the line at all.
+	send(m, "down")
+	if h, _ := m.current(); h.Name != "laptop" {
+		t.Fatalf("the cursor is on %q", h.Name)
+	}
+	if strings.Contains(m.View(), "used by") {
+		t.Error("a host nothing depends on is still drawn as a jump station")
+	}
+}
