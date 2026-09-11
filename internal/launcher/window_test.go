@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -83,5 +84,47 @@ func TestAnOverrideWinsOverAllOfIt(t *testing.T) {
 		if argv[i] != want[i] {
 			t.Fatalf("the override produced %v, want %v", argv, want)
 		}
+	}
+}
+
+// TestWindowsAlwaysHasSomewhereToPutAWindow is the report from a second
+// machine: W answered "no terminal program tram recognises", which on Windows
+// cannot be true. Every Windows can open a console window, with or without
+// anything installed.
+func TestWindowsAlwaysHasSomewhereToPutAWindow(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("this is about what Windows always has")
+	}
+	t.Setenv("TMUX", "")
+	t.Setenv("WT_SESSION", "")
+
+	if got := DetectTerminal(); got == TermNone {
+		t.Fatal("Windows was reported as having no way to open a window")
+	}
+
+	argv, err := WindowCommand(TermConhost, `C:\tram.exe`, "web1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"cmd.exe", "/c", "start", "web1", `C:\tram.exe`, "web1"}
+	for i := range want {
+		if argv[i] != want[i] {
+			t.Fatalf("the console window command is %v, want %v", argv, want)
+		}
+	}
+}
+
+// TestATitleComesBeforeTheProgram guards start's oldest trap: without a title
+// it reads a quoted program path as one and opens an empty window.
+func TestATitleComesBeforeTheProgram(t *testing.T) {
+	argv, err := WindowCommand(TermConhost, `C:\Program Files\tram.exe`, "web1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if argv[3] != "web1" {
+		t.Errorf("the argument after start is %q, which start will read as the title", argv[3])
+	}
+	if argv[4] != `C:\Program Files\tram.exe` {
+		t.Errorf("the program is %q", argv[4])
 	}
 }

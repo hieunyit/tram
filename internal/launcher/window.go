@@ -16,14 +16,17 @@ type Terminal string
 
 const (
 	TermWindowsTerminal Terminal = "wt"
-	TermTmux            Terminal = "tmux"
-	TermITerm           Terminal = "iterm"
-	TermApple           Terminal = "apple"
-	TermGnome           Terminal = "gnome"
-	TermKonsole         Terminal = "konsole"
-	TermXterm           Terminal = "xterm"
-	TermGeneric         Terminal = "generic"
-	TermNone            Terminal = ""
+	// TermConhost is Windows without Windows Terminal: the console host every
+	// Windows has, opened through cmd's own start command.
+	TermConhost Terminal = "start"
+	TermTmux    Terminal = "tmux"
+	TermITerm   Terminal = "iterm"
+	TermApple   Terminal = "apple"
+	TermGnome   Terminal = "gnome"
+	TermKonsole Terminal = "konsole"
+	TermXterm   Terminal = "xterm"
+	TermGeneric Terminal = "generic"
+	TermNone    Terminal = ""
 )
 
 // linuxTerminals are the emulators tram knows how to open a window in, most
@@ -43,12 +46,18 @@ var linuxTerminals = []struct {
 	{"foot", TermGeneric},
 	{"urxvt", TermXterm},
 	{"xterm", TermXterm},
+	// Debian and its descendants keep whichever terminal is installed behind
+	// this name, which is the last thing worth trying before giving up.
+	{"x-terminal-emulator", TermGeneric},
 }
 
 // graphical reports whether this session could put a window on a screen at all.
 // Over ssh, or on a server with no display, the answer is no and no amount of
 // looking for terminal programs will change it.
 func graphical() bool {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return true
+	}
 	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 }
 
@@ -89,6 +98,10 @@ func DetectTerminal() Terminal {
 		if _, err := exec.LookPath("wt.exe"); err == nil {
 			return TermWindowsTerminal
 		}
+		// Every Windows can open a console window, with or without anything
+		// installed. There is no such thing as a Windows with no way to open
+		// one, so tram should never say there is.
+		return TermConhost
 	case "darwin":
 		if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
 			return TermITerm
@@ -115,12 +128,12 @@ func WhyNoWindow() string {
 	if os.Getenv("TMUX") != "" {
 		return "" // tmux can always make a window
 	}
-	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" && !graphical() {
+	if !graphical() {
 		return "this session has no display, so there is no window to open. " +
 			"Run tram inside tmux and W opens a tmux window instead."
 	}
-	return "no terminal program tram recognises. " +
-		"Set window_command in config.toml, using {{host}} where the host name goes."
+	return "no terminal program tram recognises. Install one, run tram inside " +
+		"tmux, or set window_command in config.toml using {{host}} for the name."
 }
 
 // WindowCommand builds the command that opens host in a new window or tab.
@@ -150,6 +163,11 @@ func WindowCommand(t Terminal, self, host string, override []string) ([]string, 
 			where = "0"
 		}
 		return []string{"wt.exe", "-w", where, "new-tab", "--title", host, self, host}, nil
+	case TermConhost:
+		// start takes a window title first. Without one it reads a quoted
+		// program path as the title and opens an empty window instead, which
+		// is its oldest trap.
+		return []string{"cmd.exe", "/c", "start", host, self, host}, nil
 	case TermTmux:
 		return []string{"tmux", "new-window", "-n", host, self + " " + host}, nil
 	case TermITerm, TermApple:

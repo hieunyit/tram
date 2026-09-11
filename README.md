@@ -258,7 +258,8 @@ window only when tram is running in one. Started from some other terminal on a
 machine that merely has Windows Terminal installed, a tab would land in an
 application you are not looking at, so tram asks for a window of its own instead
 and the bar says that is what it did. Run tram inside Windows Terminal to get
-tabs in the window you are already in. More than six tabs at
+tabs in the window you are already in. On a Windows without Windows Terminal at
+all, `W` opens a console window through `start`, which every Windows has. More than six tabs at
 once asks first, because marking forty hosts and brushing `W` should not cost
 you forty tabs.
 
