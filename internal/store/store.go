@@ -111,9 +111,6 @@ func Load() *Store {
 	if s.Facts.Hosts == nil {
 		s.Facts.Hosts = map[string]Fact{}
 	}
-	if s.Facts.Events == nil {
-		s.Facts.Events = map[string][]Event{}
-	}
 	if s.Accounts.Links == nil {
 		s.Accounts.Links = map[string]string{}
 	}
@@ -268,10 +265,7 @@ func (s *Store) Touch(host string) error {
 	s.mu.Lock()
 	s.History.LastUsed[strings.ToLower(host)] = time.Now().Unix()
 	s.mu.Unlock()
-	if err := writeJSON(path("history.json"), &s.History); err != nil {
-		return err
-	}
-	return s.RecordEvent(host, "session opened")
+	return writeJSON(path("history.json"), &s.History)
 }
 
 // LastUsed returns the Unix time a host was last connected to, or zero.

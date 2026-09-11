@@ -2,7 +2,6 @@ package tui
 
 import (
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -254,34 +253,14 @@ func (m *Model) applyFilter() {
 	q := strings.TrimSpace(m.searchQuery)
 	m.filtered = nil
 	for _, h := range m.hosts {
-		if !h.Matches(q) {
-			continue
-		}
-		// The sessions tab is the hosts you have actually opened. The group
-		// tree still narrows it, so sessions inside one group is a question you
-		// can ask.
-		if m.tab == tabSessions && h.LastUsed == 0 {
-			continue
-		}
-		if m.inSelectedGroup(h) {
+		if h.Matches(q) && m.inSelectedGroup(h) {
 			m.filtered = append(m.filtered, h)
 		}
 	}
-	if m.tab == tabSessions && m.sortKey == sortAlias {
-		// Opening the tab on an alphabetical list would bury what you did a
-		// minute ago somewhere in the middle of it.
-		sortByRecent(m.filtered)
-	} else {
-		m.sortRows()
-	}
+	m.sortRows()
 	if m.cursor >= m.rowCount() {
 		m.cursor = max(0, m.rowCount()-1)
 	}
-}
-
-// sortByRecent puts the most recently opened host first.
-func sortByRecent(hs []model.Host) {
-	sort.SliceStable(hs, func(i, j int) bool { return hs[i].LastUsed > hs[j].LastUsed })
 }
 
 // current returns the host under the cursor.

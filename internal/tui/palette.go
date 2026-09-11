@@ -76,7 +76,8 @@ func (m *Model) commands() []command {
 		{label: "Change the sort column", key: "s"},
 		{label: "Pin or unpin " + name, key: "*"},
 		{sep: true},
-		{label: "Show the keys", key: "?"},
+		{label: "Show the identities", key: "2"},
+		{label: "Show the key list", key: "?"},
 		{label: "Quit", key: "q"},
 	}
 }

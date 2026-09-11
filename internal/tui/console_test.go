@@ -94,29 +94,17 @@ func TestSortingChangesTheOrder(t *testing.T) {
 	}
 }
 
-// TestTabsSwitchTheTable checks the three views in the design's tab strip.
+// TestTabsSwitchTheTable covers the two views in the tab strip. There were
+// three: sessions was the host table filtered to what had been opened, which is
+// what the Recent row in the group tree already does, so it went.
 func TestTabsSwitchTheTable(t *testing.T) {
 	m := newModel(t)
 	m.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 
-	send(m, "2") // sessions
-	if len(m.filtered) != 0 {
-		t.Errorf("sessions lists %d hosts before anything was connected to", len(m.filtered))
+	send(m, "2") // the identities
+	if m.tab != tabKeys {
+		t.Fatalf("2 went to %v", m.tab)
 	}
-	if !strings.Contains(m.View(), "no sessions yet") {
-		t.Errorf("the empty sessions tab does not explain itself:\n%s", m.View())
-	}
-
-	if err := m.inv.Store.Touch("web1"); err != nil {
-		t.Fatal(err)
-	}
-	m.inv.Refresh()
-	m.reload()
-	if got := model.Names(m.filtered); len(got) != 1 || got[0] != "web1" {
-		t.Errorf("sessions lists %v after connecting to web1", got)
-	}
-
-	send(m, "3") // keys
 	if !strings.Contains(m.View(), "no keys yet") {
 		t.Errorf("the empty keys tab does not explain itself:\n%s", m.View())
 	}
@@ -134,6 +122,19 @@ func TestTabsSwitchTheTable(t *testing.T) {
 	send(m, "1")
 	if m.tab != tabHosts {
 		t.Error("1 did not go back to the hosts")
+	}
+	if strings.Contains(m.View(), "SESSIONS") {
+		t.Error("the sessions tab is still drawn")
+	}
+
+	// What it used to do is still there, in the group tree.
+	if err := m.inv.Store.Touch("web1"); err != nil {
+		t.Fatal(err)
+	}
+	m.inv.Refresh()
+	m.reload()
+	if !strings.Contains(m.View(), "Recent") {
+		t.Errorf("the tree has no Recent row:\n%s", m.View())
 	}
 }
 

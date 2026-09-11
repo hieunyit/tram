@@ -17,12 +17,11 @@ import (
 // up. It is a display threshold, not a judgement about the host.
 const SlowMillis = 100
 
-// samplesKept and eventsKept bound the two per-host lists. They are small on
-// purpose: this is a sparkline and a recent-activity list, not a monitoring
+// samplesKept and sweepsKept bound the two lists this file holds. They are
+// small on purpose: this is a cache of recent measurements, not a monitoring
 // system, and an unbounded file would grow without anyone asking it to.
 const (
 	samplesKept = 30
-	eventsKept  = 6
 	sweepsKept  = 24
 )
 
@@ -61,12 +60,6 @@ type Sample struct {
 	OK     bool  `json:"ok"`
 }
 
-// Event is something that happened to a host, for the recent list.
-type Event struct {
-	At   int64  `json:"at"`
-	What string `json:"what"`
-}
-
 // Sweep is the outcome of one run across the fleet, for the health sparkline.
 type Sweep struct {
 	At   int64 `json:"at"`
@@ -76,9 +69,8 @@ type Sweep struct {
 }
 
 type factsFile struct {
-	Hosts  map[string]Fact    `json:"hosts"`
-	Events map[string][]Event `json:"events"`
-	Sweeps []Sweep            `json:"sweeps"`
+	Hosts  map[string]Fact `json:"hosts"`
+	Sweeps []Sweep         `json:"sweeps"`
 }
 
 // Reachable reports whether the last measurement got through.
@@ -211,34 +203,6 @@ func (s *Store) FleetHealth(hosts []string) (up, slow, down, unknown int) {
 	return
 }
 
-// RecordEvent notes something that happened to a host.
-func (s *Store) RecordEvent(host, what string) error {
-	s.mu.Lock()
-	if s.Facts.Events == nil {
-		s.Facts.Events = map[string][]Event{}
-	}
-	key := strings.ToLower(host)
-	list := append(s.Facts.Events[key], Event{At: time.Now().Unix(), What: what})
-	if len(list) > eventsKept {
-		list = list[len(list)-eventsKept:]
-	}
-	s.Facts.Events[key] = list
-	s.mu.Unlock()
-	return writeJSON(path("facts.json"), &s.Facts)
-}
-
-// Events returns what happened to a host, newest first.
-func (s *Store) Events(host string) []Event {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	list := s.Facts.Events[strings.ToLower(host)]
-	out := make([]Event, len(list))
-	for i, e := range list {
-		out[len(list)-1-i] = e
-	}
-	return out
-}
-
 // RenameFacts follows a host through a rename, so that a renamed host keeps its
 // measurements instead of looking like one nobody has ever reached.
 func (s *Store) RenameFacts(oldName, newName string) error {
@@ -250,13 +214,6 @@ func (s *Store) RenameFacts(oldName, newName string) error {
 			s.Facts.Hosts = map[string]Fact{}
 		}
 		s.Facts.Hosts[to] = f
-	}
-	if e, ok := s.Facts.Events[from]; ok {
-		delete(s.Facts.Events, from)
-		if s.Facts.Events == nil {
-			s.Facts.Events = map[string][]Event{}
-		}
-		s.Facts.Events[to] = e
 	}
 	s.mu.Unlock()
 	return writeJSON(path("facts.json"), &s.Facts)

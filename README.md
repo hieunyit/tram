@@ -271,18 +271,16 @@ list it belongs to tram. Most terminals also give selection back while you hold
 shift. If you would rather not have it at all, put `mouse = false` in
 `config.toml`.
 
-**Sessions** is the same table over the hosts you have actually opened, most
-recent first. It is for getting back to what you were doing: the machine you
-were on this morning is at the top of it, rather than somewhere in three hundred
-alphabetical rows.
-
 **Keys** lists your identities rather than your machines: for each one, the
 login it uses, how it proves itself, which key file, and how many hosts are
 linked to it. It is where you go to answer "which key is this host using" and
 "what else uses it". `enter` or `e` edits one, `a` makes one, and renaming one
 moves every host linked to it.
 
-`1`, `2` and `3` switch between the three tabs, and so does clicking them.
+`1` and `2` switch between the two tabs, and so does clicking them. There was a
+third, sessions, which was this table filtered to the hosts you had opened. The
+Recent row in the group tree already does that, and a tab that duplicates a row
+teaches people to ignore the strip.
 
 **Measuring.** Nothing in the latency column or the readings under it is a
 guess. `p` measures the selection and `P` measures everything shown: one ssh

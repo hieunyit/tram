@@ -40,24 +40,23 @@ type Measurement struct {
 	Explain string
 }
 
-// tab is which of the three views is showing. The design has a fourth, tunnels,
-// which tram does not do: v1 leaves port forwarding to ssh, so drawing a tab
-// for it would be drawing a promise.
+// tab is which of the two views is showing.
+//
+// The design has four. Tunnels is not here because v1 leaves port forwarding to
+// ssh, and sessions is not here because it was the host table filtered to what
+// had been opened, which is what the Recent row in the group tree already does.
+// A tab that duplicates a row is a tab that teaches people to ignore the strip.
 type tab int
 
 const (
 	tabHosts tab = iota
-	tabSessions
 	tabKeys
 )
 
-var allTabs = []tab{tabHosts, tabSessions, tabKeys}
+var allTabs = []tab{tabHosts, tabKeys}
 
 func (t tab) title() string {
-	switch t {
-	case tabSessions:
-		return "SESSIONS"
-	case tabKeys:
+	if t == tabKeys {
 		return "KEYS"
 	}
 	return "HOSTS"

@@ -44,8 +44,6 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "1":
 		m.setTab(tabHosts)
 	case "2":
-		m.setTab(tabSessions)
-	case "3":
 		m.setTab(tabKeys)
 
 	case "g":
@@ -448,10 +446,7 @@ func (m *Model) tablePaneLines(height, w, x, y int) []string {
 func (m *Model) scopeLine(w int) string {
 	label := m.st.ok.Render(m.scopeLabel())
 	note := ""
-	switch m.tab {
-	case tabSessions:
-		note = "hosts you have opened, most recent first"
-	case tabKeys:
+	if m.tab == tabKeys {
 		note = "identities, and the hosts linked to each"
 	}
 	if note == "" || w < len(note)+24 {
@@ -471,10 +466,7 @@ func (m *Model) spreadIn(w int, left, right string) string {
 
 // scopeLabel says which set of hosts the table is showing.
 func (m *Model) scopeLabel() string {
-	switch m.tab {
-	case tabSessions:
-		return "sessions"
-	case tabKeys:
+	if m.tab == tabKeys {
 		return "keys"
 	}
 	if g := m.selectedGroup(); g.path != viewAll {
@@ -655,8 +647,6 @@ func (m *Model) emptyLine() string {
 	switch {
 	case m.searchQuery != "":
 		return "nothing matches " + m.searchQuery
-	case m.tab == tabSessions:
-		return "no sessions yet; connect to something and it will be listed here"
 	case len(m.hosts) == 0:
 		return "no hosts in this file yet; press a to add one"
 	}
@@ -1002,7 +992,7 @@ func (m *Model) viewHelp() string {
 		{"space", "mark a host; actions then apply to every marked host"},
 		{"p / P", "measure the selection, or everything shown: latency, load, system"},
 		{"s / S", "change the column the table is sorted by, and reverse it"},
-		{"1 2 3", "hosts, sessions, keys"},
+		{"1 2", "hosts, keys"},
 		{"/", "search; a query starting with # matches groups and tags"},
 		{"esc", "clear the search, then the marks"},
 		{"a e c d", "add, edit, clone, delete a host"},
