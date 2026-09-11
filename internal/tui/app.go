@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/model"
+	"github.com/hieuny/tram/internal/remote"
 )
 
 // Action is what the caller should do after the interface exits.
@@ -46,6 +48,7 @@ type screen int
 const (
 	screenList screen = iota
 	screenResult
+	screenFiles
 )
 
 // mode is the overlay on top of the current screen.
@@ -152,7 +155,12 @@ type Model struct {
 	confirmText string
 	confirmFn   func() tea.Cmd
 
-	result  *resultView
+	result *resultView
+
+	// files is the two-pane browser, open only while it is showing. It holds a
+	// live connection to one host, which is closed when it goes away.
+	files *filesView
+
 	status  string
 	problem string
 
@@ -179,8 +187,27 @@ type Runner interface {
 	// a tab each, or a pane beside the list. It says what it did, because what
 	// a terminal can do varies and the answer is worth a line in the bar.
 	Open(hosts []model.Host, beside bool) (string, error)
+	// Files opens a connection to a host for the two-pane browser, and Copy
+	// moves one file or folder in either direction.
+	Files(host model.Host) (FileSystem, error)
+	Copy(job remote.Copy) error
 	Doctor(hosts []model.Host) []Row
 	Exec(hosts []model.Host, command string) []Row
+}
+
+// FileSystem is the far side of the browser: one open connection, asked for
+// listings and for the few changes a file manager makes.
+//
+// It is an interface rather than the connection itself so that the browser can
+// be driven without a machine at the other end, which is the only way any of
+// this is testable.
+type FileSystem interface {
+	// List changes to a directory and reads it, returning where it ended up.
+	List(path string) (string, []remote.Entry, error)
+	Mkdir(path string) error
+	Rename(from, to string) error
+	Remove(path string, dir bool) error
+	Close() error
 }
 
 // New builds the interface over an inventory.
@@ -358,6 +385,62 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.problem = msg.Error()
 		return m, nil
 
+	case filesOpenedMsg:
+		m.status = ""
+		if msg.err != nil {
+			m.problem = msg.err.Error()
+			return m, nil
+		}
+		m.files = &filesView{
+			host:  msg.host,
+			sess:  msg.sess,
+			far:   filePane{dir: msg.dir, entries: msg.list, marked: map[string]bool{}},
+			local: filePane{marked: map[string]bool{}},
+		}
+		m.screen = screenFiles
+		here, _ := os.Getwd()
+		return m, m.localCmd(here)
+
+	case filesListedMsg:
+		if m.files == nil {
+			return m, nil
+		}
+		m.files.busy = ""
+		if msg.err != nil {
+			m.files.problem = msg.err.Error()
+			return m, nil
+		}
+		m.files.problem = ""
+		side := &m.files.local
+		if msg.far {
+			side = &m.files.far
+		}
+		// A new directory is a new list: the cursor goes to the top and the
+		// marks go away, because they named files that are no longer on screen.
+		side.dir, side.entries = msg.dir, msg.list
+		side.cursor, side.offset = 0, 0
+		side.marked = map[string]bool{}
+		return m, nil
+
+	case filesDoneMsg:
+		if m.files == nil {
+			return m, nil
+		}
+		m.files.busy = ""
+		m.files.problem = ""
+		m.files.note = msg.note
+		if msg.err != nil {
+			m.files.problem = msg.err.Error()
+		}
+		var cmds []tea.Cmd
+		if msg.refreshLocal {
+			cmds = append(cmds, m.localCmd(m.files.local.dir))
+		}
+		if msg.refreshFar {
+			cmds = append(cmds, m.farCmd("."))
+		}
+		return m, tea.Batch(cmds...)
+
 	case resultsMsg:
 		m.result = newResultView(msg.title, msg.rows, m.st, m.gl)
 		m.result.resize(m.width, m.listHeight())
@@ -401,6 +484,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.screen == screenResult {
 			return m.updateResult(msg)
+		}
+		if m.screen == screenFiles {
+			return m.updateFiles(msg)
 		}
 		return m.updateList(msg)
 	}
@@ -456,6 +542,9 @@ func (m *Model) View() string {
 	}
 	if m.screen == screenResult {
 		return m.viewResult()
+	}
+	if m.screen == screenFiles {
+		return m.viewFiles()
 	}
 	return m.viewList()
 }

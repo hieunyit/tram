@@ -325,6 +325,21 @@ finding the identity does not exist yet no longer costs you the half-filled
 host, because the account form opens on top and hands back to it. The key field
 opens the folder, the same as the import screen's.
 
+**Files.** `f` opens a two-pane browser: this machine on the left, the host on
+the right. `tab` moves between them, `enter` walks into a directory and `u`
+comes back, `space` marks, `c` copies what is marked to the other side, `n`
+makes a folder, `r` renames, `d` deletes, `.` shows the hidden names and `esc`
+closes the connection and goes back. Every copy and every delete asks first, and
+says which side it is about to touch.
+
+The listing comes from one shell held open on the host for as long as the
+browser is: `ls` read once per directory, down a connection that was made once.
+Transfers are `scp`, which speaks the same `ssh_config` and is already on every
+machine that has ssh. tram does not embed an ssh client for any of this, so host
+keys, ProxyJump chains, agents and certificates are ssh's business here exactly
+as they are everywhere else. `F` still hands the terminal to the real `sftp`
+client, for the things a browser does not do.
+
 **Results.** One block per host. A handful of hosts opens with the output
 already showing; more than that opens collapsed, because forty blocks of output
 is not a screen anyone can read, and `space` expands one while `o` expands them

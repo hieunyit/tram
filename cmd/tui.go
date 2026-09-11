@@ -14,6 +14,7 @@ import (
 	"github.com/hieuny/tram/internal/launcher"
 	"github.com/hieuny/tram/internal/model"
 	"github.com/hieuny/tram/internal/probe"
+	"github.com/hieuny/tram/internal/remote"
 	"github.com/hieuny/tram/internal/runner"
 	"github.com/hieuny/tram/internal/tui"
 )
@@ -217,6 +218,38 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 		return hosts[0].Name + " opened in a new tab", nil
 	}
 	return fmt.Sprintf("opened %d tabs", len(hosts)), nil
+}
+
+// Files opens a shell on a host for the two-pane browser.
+//
+// It is opened the same way an interactive session is, askpass and all, so a
+// passphrase typed for a session is not typed again for the browser.
+func (r *tuiRunner) Files(h model.Host) (tui.FileSystem, error) {
+	inv, err := r.app.Inventory()
+	if err != nil {
+		return nil, err
+	}
+	req := launcher.Request{
+		Host:           h.Name,
+		ConfigPath:     r.app.SSHConfigArg(),
+		ConnectTimeout: inv.Store.Options.ConnectTimeout,
+		NoTTY:          true,
+		// A shell, not a login shell: the browser asks it questions and reads
+		// the answers, and a profile printing a banner would be read as a file
+		// list.
+		Command: []string{"/bin/sh"},
+	}
+	timeout := time.Duration(max(inv.Store.Options.Timeout, 20)) * time.Second
+	return remote.Open(h.Name, remote.Options{
+		Argv:    req.Argv(),
+		Env:     req.Env(),
+		Timeout: timeout,
+	})
+}
+
+// Copy moves one file or folder between this machine and a host.
+func (r *tuiRunner) Copy(job remote.Copy) error {
+	return job.Run(r.app.SSHConfigArg(), os.Environ())
 }
 
 // Agent reports what the ssh agent is holding.

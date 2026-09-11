@@ -90,6 +90,12 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openElsewhere(m.selection(), true)
 	case "f":
 		if h, ok := m.current(); ok {
+			return m.openFiles(h)
+		}
+	case "F":
+		// The other sftp: tram steps out and the real client takes the
+		// terminal, for the things a browser does not do.
+		if h, ok := m.current(); ok {
 			return m.quitWith(ActionSFTP, h.Name)
 		}
 
@@ -940,7 +946,7 @@ func (m *Model) listKeys() [][2]string {
 	}
 	return [][2]string{
 		{m.gl.enter, "connect"}, {"space", "mark"}, {"W", "tab"}, {"V", "beside"},
-		{"f", "sftp"}, {"p", "ping"}, {"a", "add"}, {"e", "edit"}, {"d", "del"},
+		{"f", "files"}, {"p", "ping"}, {"a", "add"}, {"e", "edit"}, {"d", "del"},
 		{"I", "import"}, {"x", "exec"}, {"D", "doctor"}, {"s", "sort"},
 		{"/", "filter"}, {"?", "help"}, {"q", "quit"},
 	}
@@ -949,6 +955,10 @@ func (m *Model) listKeys() [][2]string {
 // statusLine is the sentence against the right edge of the bottom bar.
 func (m *Model) statusLine() string {
 	switch {
+	// A question first: while one is standing, nothing else on this line
+	// matters, and a prompt nobody can see is a prompt nobody can answer.
+	case m.mode == modeConfirm:
+		return m.confirmText + "  [y/n]"
 	case m.problem != "":
 		return m.problem
 	case m.running != "":
@@ -986,7 +996,8 @@ func (m *Model) viewHelp() string {
 		{"ctrl+k", "the command palette: every action, by name"},
 		{"W", "open a tab for every marked host; tram stays where it is"},
 		{"V", "open beside the list, in a pane of the same window"},
-		{"f", "open sftp against the selected host"},
+		{"f", "the file browser: this machine on the left, the host on the right"},
+		{"F", "hand the terminal to the real sftp client instead"},
 		{"y", "copy the ssh command for the selected host"},
 		{"space", "mark a host; actions then apply to every marked host"},
 		{"p / P", "measure the selection, or everything shown: latency, load, system"},

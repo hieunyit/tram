@@ -20,6 +20,8 @@ const (
 	formExec
 	formImport
 	formAccount
+	formMkdir
+	formRename
 )
 
 // fieldID names a form field so the code reads as something other than indexes.
@@ -38,6 +40,7 @@ const (
 	fCommand fieldID = "command"
 	fPath    fieldID = "path"
 	fAuth    fieldID = "auth"
+	fPathTo  fieldID = "to"
 	fTags    fieldID = "tags"
 )
 
@@ -158,6 +161,55 @@ func (m *Model) openExecForm() {
 	f.focus(0)
 	m.form = f
 	m.mode = modeForm
+}
+
+// openMkdirForm asks for a folder name on whichever side the browser is on.
+func (m *Model) openMkdirForm() {
+	where := "this machine"
+	if m.files.onFar {
+		where = m.files.host.Name
+	}
+	f := &form{
+		kind:  formMkdir,
+		st:    m.st,
+		gl:    m.gl,
+		title: "new folder on " + where,
+		note:  m.filesDir(),
+	}
+	f.fields = []*field{{id: fPathTo, label: "name", input: newInput("", "logs")}}
+	f.focus(0)
+	m.form = f
+	m.mode = modeForm
+}
+
+// openRenameForm asks what the name under the cursor should become.
+func (m *Model) openRenameForm(name string) {
+	where := "this machine"
+	if m.files.onFar {
+		where = m.files.host.Name
+	}
+	f := &form{
+		kind:  formRename,
+		st:    m.st,
+		gl:    m.gl,
+		title: "rename on " + where,
+		note:  m.filesDir(),
+	}
+	f.fields = []*field{{id: fPathTo, label: name, input: newInput(name, "")}}
+	f.focus(0)
+	m.form = f
+	m.mode = modeForm
+}
+
+// filesDir is the directory the browser is looking at on the active side.
+func (m *Model) filesDir() string {
+	if m.files == nil {
+		return ""
+	}
+	if m.files.onFar {
+		return m.files.far.dir
+	}
+	return m.files.local.dir
 }
 
 func (f *form) get(id fieldID) string {
@@ -320,6 +372,9 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 
 	case formImport:
 		return m.submitImport()
+
+	case formMkdir, formRename:
+		return m.submitFileName()
 
 	case formExec:
 		cmdText := f.get(fCommand)

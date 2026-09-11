@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/model"
+	"github.com/hieuny/tram/internal/remote"
 )
 
 type nullRunner struct{}
@@ -36,6 +37,14 @@ type opened struct {
 }
 
 var lastOpen *opened
+
+// The browser is given its own machine by filesRunner; a runner that has none
+// says so the way a refused connection would.
+func (nullRunner) Files(h model.Host) (FileSystem, error) {
+	return nil, fmt.Errorf("no connection in a test")
+}
+
+func (nullRunner) Copy(job remote.Copy) error { return nil }
 
 func (nullRunner) Open(hosts []model.Host, beside bool) (string, error) {
 	lastOpen = &opened{hosts: model.Names(hosts), beside: beside}
