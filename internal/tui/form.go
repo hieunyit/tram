@@ -38,6 +38,7 @@ const (
 	fCommand fieldID = "command"
 	fPath    fieldID = "path"
 	fAuth    fieldID = "auth"
+	fTags    fieldID = "tags"
 )
 
 type field struct {
@@ -68,6 +69,10 @@ type form struct {
 	// after is called with what this form produced, for a form opened from
 	// inside another one.
 	after func(string) tea.Cmd
+	// replaces names the account this form is editing, empty when it is making
+	// a new one. Without it, saving an edit reads as a name collision with
+	// itself.
+	replaces string
 }
 
 func newInput(value, placeholder string) textinput.Model {
@@ -107,6 +112,7 @@ func (m *Model) openForm(kind formKind, h model.Host) {
 		{id: fPort, label: "port", input: newInput(h.Port, "22")},
 		{id: fJump, label: "jump", input: newInput(h.ProxyJump, "none"), pick: true, hint: "a station to go through; enter to choose"},
 		{id: fGroup, label: "group", input: newInput(h.Group, "prod/web"), pick: true, hint: "slashes nest groups"},
+		{id: fTags, label: "tags", input: newInput(h.TagList(), "gpu, nlp"), hint: "free labels, separated by commas; / #gpu finds them"},
 		{id: fDesc, label: "desc", input: newInput(h.Desc, "")},
 	}
 	f.syncAccount()
@@ -130,6 +136,7 @@ func (m *Model) openBatchForm(hosts []model.Host) {
 		{id: fPort, label: "port", input: newInput("", "leave alone")},
 		{id: fJump, label: "jump", input: newInput("", "leave alone"), pick: true},
 		{id: fGroup, label: "group", input: newInput("", "leave alone"), pick: true},
+		{id: fTags, label: "tags", input: newInput("", "leave alone")},
 		{id: fKey, label: "key", input: newInput("", "leave alone")},
 	}
 	f.focus(0)
@@ -245,11 +252,29 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (f *form) view(width, height int) string {
-	var b strings.Builder
-	b.WriteString(f.st.title.Render(f.title) + "\n\n")
+// viewForm draws the form in the same frame as everything else: the two bars,
+// one pane, the key bar. The form itself only knows about its fields.
+func (m *Model) viewForm() string {
+	f := m.form
+	bodyH := m.bodyHeight()
+	w := m.width - 2
+
+	lines := []string{" " + m.heading(f.title), " " + m.hrule(w), ""}
+	lines = append(lines, f.lines(bodyH-3, w)...)
+
+	return m.shell(
+		m.pane(lines, m.width, bodyH),
+		[][2]string{{"ctrl+s", "save"}, {"tab", "move"}, {"enter", "next or choose"}, {"esc", "cancel"}},
+		f.title,
+	)
+}
+
+// lines is the body of the form, one string per row, unpadded: the pane it is
+// drawn in does the padding.
+func (f *form) lines(height, width int) []string {
+	var out []string
 	if f.note != "" {
-		b.WriteString(f.st.muted.Render("  "+f.note) + "\n\n")
+		out = append(out, f.st.muted.Render(f.note), "")
 	}
 
 	labelW := 10
@@ -259,24 +284,31 @@ func (f *form) view(width, height int) string {
 		}
 		marker := "  "
 		if i == f.cursor {
-			marker = f.st.selected.Render(f.gl.arrow[:1]) + " "
+			marker = f.st.selected.Render(f.gl.point) + " "
 		}
 		label := f.st.label.Render(pad(fl.label, labelW))
-		b.WriteString(marker + label + " " + fl.input.View() + "\n")
+		out = append(out, marker+label+" "+fl.input.View())
 		if i == f.cursor && fl.hint != "" {
-			b.WriteString("  " + strings.Repeat(" ", labelW+1) + f.st.muted.Render(fl.hint) + "\n")
+			out = append(out, "  "+strings.Repeat(" ", labelW+1)+f.st.muted.Render(fl.hint))
 		}
 	}
 
 	if acct := f.get(fAccount); acct != "" {
-		b.WriteString("\n" + f.st.muted.Render(
-			"  account "+acct+" will write User and IdentityFile into this stanza") + "\n")
+		out = append(out, "", f.st.muted.Render(
+			"account "+acct+" will write User and IdentityFile into this stanza"))
 	}
 	if f.problem != "" {
-		b.WriteString("\n  " + f.st.bad.Render(f.problem) + "\n")
+		out = append(out, "", f.st.bad.Render(f.problem))
 	}
-	b.WriteString("\n" + f.st.help.Render("  tab move  enter next or choose  ctrl+s save  esc cancel"))
-	return b.String()
+	if len(out) > height {
+		out = out[:height]
+	}
+	return out
+}
+
+// view is the form as one string, which is what the tests read.
+func (f *form) view(width, height int) string {
+	return strings.Join(f.lines(height, width), "\n")
 }
 
 // submitForm turns the form into a change and applies it.
@@ -319,6 +351,9 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 			if v := f.get(fGroup); v != "" {
 				spec.Group = inventory.Str(v)
 			}
+			if v := f.get(fTags); v != "" {
+				spec.Tags = inventory.Str(v)
+			}
 			if v := f.get(fKey); v != "" {
 				spec.SetIdentityFiles(splitList(v))
 			}
@@ -344,6 +379,7 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 	spec.Port = inventory.Str(f.get(fPort))
 	spec.ProxyJump = inventory.Str(f.get(fJump))
 	spec.Group = inventory.Str(f.get(fGroup))
+	spec.Tags = inventory.Str(f.get(fTags))
 	spec.Desc = inventory.Str(f.get(fDesc))
 	spec.Account = inventory.Str(f.get(fAccount))
 	if f.get(fAccount) == "" {

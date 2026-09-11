@@ -21,6 +21,7 @@ import (
 const (
 	groupMarker = "#tram-group:"
 	descMarker  = "#tram-desc:"
+	tagsMarker  = "#tram-tags:"
 )
 
 // Inventory is the loaded configuration tree plus tram's own state.
@@ -133,13 +134,8 @@ func hostFromBlock(b *sshconf.Block, names []string) model.Host {
 	// written above the Host line counts. Some tools put them there, and a
 	// marker tram cannot see is a group the user silently loses.
 	for _, l := range b.LeadLines() {
-		if g, d, ok := readMarker(l.Raw); ok {
-			if g != "" {
-				h.Group = g
-			}
-			if d != "" {
-				h.Desc = d
-			}
+		if m, ok := readMarker(l.Raw); ok {
+			m.applyTo(&h)
 		}
 	}
 
@@ -147,13 +143,8 @@ func hostFromBlock(b *sshconf.Block, names []string) model.Host {
 	for _, l := range b.Body() {
 		switch {
 		case l.Kind == sshconf.LineComment:
-			if g, d, ok := readMarker(l.Raw); ok {
-				if g != "" {
-					h.Group = g
-				}
-				if d != "" {
-					h.Desc = d
-				}
+			if m, ok := readMarker(l.Raw); ok {
+				m.applyTo(&h)
 			}
 		case l.Kind == sshconf.LineDirective && !known[strings.ToLower(l.Keyword)]:
 			k := l.Keyword
@@ -186,31 +177,52 @@ var legacyMarkers = []struct{ group, desc string }{
 	{"#sshm:group=", "#sshm:desc="},
 }
 
-// readMarker reads a group or description out of a comment, in tram's own
-// spelling or in one it inherited. It reports which of the two it found.
-func readMarker(raw string) (group, desc string, ok bool) {
+// meta is what one of tram's comment lines said. A line carries exactly one of
+// the three, and the zero value of the others means "this line said nothing
+// about that", which is what keeps a rewrite of the group from erasing the
+// description.
+type meta struct{ group, desc, tags string }
+
+func (m meta) applyTo(h *model.Host) {
+	if m.group != "" {
+		h.Group = m.group
+	}
+	if m.desc != "" {
+		h.Desc = m.desc
+	}
+	if m.tags != "" {
+		h.Tags = model.ParseTags(m.tags)
+	}
+}
+
+// readMarker reads a group, a description or a list of tags out of a comment,
+// in tram's own spelling or in one it inherited.
+func readMarker(raw string) (meta, bool) {
 	if v, hit := markerValue(raw, groupMarker); hit {
-		return v, "", true
+		return meta{group: v}, true
 	}
 	if v, hit := markerValue(raw, descMarker); hit {
-		return "", v, true
+		return meta{desc: v}, true
+	}
+	if v, hit := markerValue(raw, tagsMarker); hit {
+		return meta{tags: v}, true
 	}
 	for _, m := range legacyMarkers {
 		if v, hit := markerValue(raw, m.group); hit {
-			return v, "", true
+			return meta{group: v}, true
 		}
 		if v, hit := markerValue(raw, m.desc); hit {
-			return "", v, true
+			return meta{desc: v}, true
 		}
 	}
-	return "", "", false
+	return meta{}, false
 }
 
 // isMarker reports whether a line is one of tram's metadata comments, in any
 // spelling, so that rewriting the metadata replaces it rather than piling a
 // second copy on top.
 func isMarker(raw string) bool {
-	_, _, ok := readMarker(raw)
+	_, ok := readMarker(raw)
 	return ok
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -27,13 +28,21 @@ func runTUI(a *App) error {
 	if !isTerminal(os.Stdout) {
 		return fmt.Errorf("the interface needs a terminal; try `tram ls`")
 	}
+	tui.Version = Version
 	for {
 		inv, err := a.Inventory()
 		if err != nil {
 			return err
 		}
 		m := tui.New(inv, &tuiRunner{app: a}, a.ASCII)
-		p := tea.NewProgram(m, tea.WithAltScreen())
+		opts := []tea.ProgramOption{tea.WithAltScreen()}
+		if inv.Store.Options.MouseOn() {
+			// Cell motion rather than all motion: tram wants presses, the wheel
+			// and a drag, and reporting every idle movement of the pointer is
+			// a stream of events nothing here reads.
+			opts = append(opts, tea.WithMouseCellMotion())
+		}
+		p := tea.NewProgram(m, opts...)
 		if _, err := p.Run(); err != nil {
 			return err
 		}
@@ -122,26 +131,75 @@ func (r *tuiRunner) opts() (runner.Options, probe.Options) {
 	return ro, probe.Options{ConfigPath: r.app.SSHConfigArg(), Timeout: ro.Timeout}
 }
 
-func (r *tuiRunner) Ping(hosts []model.Host) []tui.Row {
+// factsCommand is what tram runs on the far end to fill in the details pane.
+//
+// It is two ordinary commands and nothing else: no script, no temporary file,
+// no assumption about the shell beyond running one line. A host that has
+// neither, such as a switch, still answers the connection, and the parse simply
+// finds nothing.
+const factsCommand = "uname -sr 2>/dev/null; uptime 2>/dev/null"
+
+// Measure probes hosts and, in the same connection, asks each one what it is
+// and how loaded it is.
+//
+// One round trip answers latency, load and system together. Asking separately
+// would double the connections for facts that are only worth having because
+// they are cheap.
+func (r *tuiRunner) Measure(hosts []model.Host) []tui.Measurement {
 	ro, po := r.opts()
+	po.Command = []string{factsCommand}
+
 	res := runner.Run(context.Background(), jobsWithAddr(hosts), func(ctx context.Context, j runner.Job) probe.Result {
 		return probe.Run(ctx, j.Host, withAddr(po, j))
 	}, ro)
 
-	rows := make([]tui.Row, len(res))
+	out := make([]tui.Measurement, len(res))
 	for i, x := range res {
-		rows[i] = tui.Row{
-			Host:    x.Host,
-			Status:  string(x.Class),
-			OK:      x.Class.Good(),
-			Summary: pingSummary(x),
-			Body:    strings.TrimSpace(x.Raw),
+		mm := tui.Measurement{
+			Host:   x.Host,
+			Class:  string(x.Class),
+			OK:     x.Class.Good(),
+			Millis: x.Millis,
+			Detail: probeSummary(x),
 		}
+		if mm.OK {
+			mm.OS, mm.Uptime, mm.Load = parseFacts(x.Output)
+		}
+		out[i] = mm
 	}
-	return rows
+	return out
 }
 
-func pingSummary(x probe.Result) string {
+// Agent reports what the ssh agent is holding.
+//
+// ssh-add's exit status is the answer: 0 with a list, 1 for an agent with
+// nothing in it, 2 for no agent at all. The keys themselves are never shown;
+// how many there are is all the bar has room for and all it needs to say.
+func (r *tuiRunner) Agent() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "ssh-add", "-l").Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return "agent empty"
+		}
+		return "no agent"
+	}
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	if n == 1 {
+		return "agent 1 key"
+	}
+	return fmt.Sprintf("agent %d keys", n)
+}
+
+// probeSummary is the one line a result is worth when it is not a success.
+func probeSummary(x probe.Result) string {
 	if x.Class.Good() {
 		return fmt.Sprintf("%d ms", x.Millis)
 	}
@@ -149,6 +207,64 @@ func pingSummary(x probe.Result) string {
 		return x.Detail
 	}
 	return x.Class.Explain()
+}
+
+// parseFacts reads what uname and uptime wrote.
+//
+// Both commands vary between systems, so this looks for the shapes they agree
+// on and gives up quietly on the rest: an empty field is drawn as a dash, which
+// is better than a wrong reading.
+func parseFacts(output string) (os, up, load string) {
+	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, " up ") || strings.Contains(line, "load average") {
+			u, l := parseUptime(line)
+			if u != "" {
+				up = u
+			}
+			if l != "" {
+				load = l
+			}
+			continue
+		}
+		if os == "" {
+			// uname -sr writes one line and nothing else, so the first line
+			// that is not an uptime is it.
+			os = line
+		}
+	}
+	return os, up, load
+}
+
+// parseUptime pulls how long the machine has been up and its first load figure
+// out of the one line uptime writes.
+func parseUptime(line string) (up, load string) {
+	if i := strings.Index(line, " up "); i >= 0 {
+		rest := line[i+4:]
+		// The clause after the uptime is either the user count or the load
+		// average, and both are introduced by a comma.
+		cut := len(rest)
+		for _, marker := range []string{"user", "load average"} {
+			if j := strings.Index(rest, marker); j >= 0 && j < cut {
+				if k := strings.LastIndex(rest[:j], ","); k >= 0 {
+					cut = k
+				}
+			}
+		}
+		up = strings.TrimSpace(rest[:cut])
+	}
+	if i := strings.Index(line, "load average"); i >= 0 {
+		if j := strings.Index(line[i:], ":"); j >= 0 {
+			fields := strings.FieldsFunc(line[i+j+1:], func(rn rune) bool { return rn == ',' || rn == ' ' })
+			if len(fields) > 0 {
+				load = fields[0]
+			}
+		}
+	}
+	return up, load
 }
 
 func (r *tuiRunner) Doctor(hosts []model.Host) []tui.Row {

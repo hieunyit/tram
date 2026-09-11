@@ -33,6 +33,8 @@ type Spec struct {
 	ProxyJump *string
 	Group     *string
 	Desc      *string
+	// Tags is the whole list as typed, split on commas and spaces when written.
+	Tags *string
 
 	// IdentityFiles replaces every IdentityFile line when non-nil. A non-nil
 	// empty slice removes them all.
@@ -305,10 +307,10 @@ func (inv *Inventory) reblock(path, name string) *sshconf.Block {
 	return nil
 }
 
-// applyMarkers writes the group and description comment lines, which are the
-// only two facts tram keeps in ssh_config that ssh itself has no keyword for.
+// applyMarkers writes the group, description and tag comment lines, which are
+// the facts tram keeps in ssh_config that ssh itself has no keyword for.
 func applyMarkers(b *sshconf.Block, s Spec) {
-	if s.Group == nil && s.Desc == nil {
+	if s.Group == nil && s.Desc == nil && s.Tags == nil {
 		return
 	}
 	f := b.File
@@ -323,14 +325,17 @@ func applyMarkers(b *sshconf.Block, s Spec) {
 	// Read what is there before removing it. The two markers share one rewrite,
 	// so changing the group must not take the description with it: a field the
 	// caller said nothing about is a field to leave alone.
-	curGroup, curDesc := "", ""
+	cur := meta{}
 	for _, l := range append(append([]sshconf.Line{}, b.LeadLines()...), b.Body()...) {
-		if g, d, ok := readMarker(l.Raw); ok {
-			if g != "" {
-				curGroup = g
+		if m, ok := readMarker(l.Raw); ok {
+			if m.group != "" {
+				cur.group = m.group
 			}
-			if d != "" {
-				curDesc = d
+			if m.desc != "" {
+				cur.desc = m.desc
+			}
+			if m.tags != "" {
+				cur.tags = m.tags
 			}
 		}
 	}
@@ -360,7 +365,7 @@ func applyMarkers(b *sshconf.Block, s Spec) {
 		keep = append(keep, l)
 	}
 
-	group, desc := curGroup, curDesc
+	group, desc, tags := cur.group, cur.desc, cur.tags
 	if s.Group != nil {
 		// Tidied on the way in, so that "prod / web" and "prod/web" are the same
 		// group rather than two that only look alike in a listing.
@@ -369,6 +374,9 @@ func applyMarkers(b *sshconf.Block, s Spec) {
 	if s.Desc != nil {
 		desc = *s.Desc
 	}
+	if s.Tags != nil {
+		tags = strings.Join(model.ParseTags(*s.Tags), ", ")
+	}
 
 	var head []sshconf.Line
 	if group != "" {
@@ -376,6 +384,9 @@ func applyMarkers(b *sshconf.Block, s Spec) {
 	}
 	if desc != "" {
 		head = append(head, sshconf.RawLine(f, indent+descMarker+" "+desc))
+	}
+	if tags != "" {
+		head = append(head, sshconf.RawLine(f, indent+tagsMarker+" "+tags))
 	}
 	sshconf.ReplaceBody(b, append(head, keep...))
 }
@@ -400,6 +411,7 @@ func (inv *Inventory) Clone(src, dst string, s Spec) (*Change, error) {
 	base.ProxyJump = Str(from.ProxyJump)
 	base.Group = Str(from.Group)
 	base.Desc = Str(from.Desc)
+	base.Tags = Str(from.TagList())
 	base.SetIdentityFiles(from.IdentityFiles)
 	for kw, vals := range from.Other {
 		for _, v := range vals {
@@ -426,6 +438,9 @@ func (inv *Inventory) Clone(src, dst string, s Spec) (*Change, error) {
 	}
 	if s.Desc != nil {
 		base.Desc = s.Desc
+	}
+	if s.Tags != nil {
+		base.Tags = s.Tags
 	}
 	if s.setIdentity {
 		base.SetIdentityFiles(s.IdentityFiles)
@@ -519,6 +534,7 @@ func (inv *Inventory) Rename(oldName, newName string, force bool) (*Change, erro
 
 	_ = inv.Store.RenameLink(oldName, newName)
 	_ = inv.Store.RenameHistory(oldName, newName)
+	_ = inv.Store.RenameFacts(oldName, newName)
 	return ch, nil
 }
 

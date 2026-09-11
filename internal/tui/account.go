@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hieuny/tram/internal/model"
@@ -42,6 +43,23 @@ func (m *Model) openAccountForm(afterwards func(name string) tea.Cmd) {
 	m.pushForm(f)
 }
 
+// openAccountFormFor opens an identity that already exists, so that a key can
+// be corrected rather than only replaced.
+func (m *Model) openAccountFormFor(a model.Account) {
+	m.openAccountForm(nil)
+	f := m.form
+	f.replaces = a.Name
+	f.title = "edit " + a.Name
+	f.note = "changing the name moves every host that uses this identity to the new one"
+	f.set(fName, a.Name)
+	f.set(fUser, a.User)
+	f.set(fAuth, string(a.Auth))
+	f.set(fKey, a.KeyPath)
+	f.set(fDesc, a.Desc)
+	f.syncAuth()
+	f.focus(0)
+}
+
 // syncAuth hides the key field for the methods that have no key file, so the
 // form never shows a box that cannot mean anything.
 func (f *form) syncAuth() {
@@ -71,7 +89,7 @@ func (m *Model) submitAccount() (tea.Model, tea.Cmd) {
 		f.problem = err.Error()
 		return m, nil
 	}
-	if _, exists := m.inv.Store.Account(a.Name); exists {
+	if _, exists := m.inv.Store.Account(a.Name); exists && !strings.EqualFold(a.Name, f.replaces) {
 		f.problem = fmt.Sprintf("an account called %q already exists", a.Name)
 		return m, nil
 	}
@@ -94,12 +112,26 @@ func (m *Model) submitAccount() (tea.Model, tea.Cmd) {
 		f.problem = err.Error()
 		return m, nil
 	}
+	// A rename has to take the hosts with it, or they end up pointing at an
+	// identity that no longer exists.
+	if f.replaces != "" && !strings.EqualFold(f.replaces, a.Name) {
+		for _, host := range m.inv.Store.LinkedHosts(f.replaces) {
+			_ = m.inv.Store.SetLink(host, a.Name)
+		}
+		if err := m.inv.Store.DeleteAccount(f.replaces); err != nil {
+			f.problem = err.Error()
+			return m, nil
+		}
+	}
 
 	after := f.after
 	m.popForm()
 	m.reload()
 
 	msg := "created account " + a.Name
+	if f.replaces != "" {
+		msg = "saved account " + a.Name
+	}
 	if warn != "" {
 		msg += "  " + m.gl.dot + "  " + warn
 	}

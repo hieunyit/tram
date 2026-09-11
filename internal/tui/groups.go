@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/hieuny/tram/internal/model"
@@ -16,6 +16,7 @@ const (
 	viewAll       = ":all"
 	viewFavorites = ":favorites"
 	viewRecent    = ":recent"
+	viewMarked    = ":marked"
 	viewUngrouped = ":ungrouped"
 )
 
@@ -37,6 +38,11 @@ type groupRow struct {
 // navigate: everything, the ones pinned, the ones opened lately. The tree below
 // is for when the fleet is large enough that scanning it is not an option.
 func (m *Model) rebuildGroups() {
+	// The row under the cursor is remembered by name, not by number. Rows come
+	// and go as hosts are marked and branches are opened, and an index that
+	// survives the rebuild would quietly select a different group.
+	was := m.selectedGroup().path
+
 	rows := []groupRow{{label: "All", path: viewAll, count: len(m.hosts)}}
 
 	fav, recent := 0, 0
@@ -53,6 +59,11 @@ func (m *Model) rebuildGroups() {
 	}
 	if recent > 0 {
 		rows = append(rows, groupRow{label: m.gl.clock + " Recent", path: viewRecent, count: recent})
+	}
+	// Marked is a view rather than a group: it is where you go to check what an
+	// action is about to be applied to, so it appears as soon as there is one.
+	if len(m.marked) > 0 {
+		rows = append(rows, groupRow{label: m.gl.marked + " Marked", path: viewMarked, count: len(m.marked)})
 	}
 
 	var walk func(nodes []*model.GroupNode)
@@ -79,11 +90,12 @@ func (m *Model) rebuildGroups() {
 	}
 
 	m.groupRows = rows
-	if m.groupCursor >= len(rows) {
-		m.groupCursor = len(rows) - 1
-	}
-	if m.groupCursor < 0 {
-		m.groupCursor = 0
+	m.groupCursor = 0
+	for i, r := range rows {
+		if r.path == was {
+			m.groupCursor = i
+			break
+		}
 	}
 }
 
@@ -104,6 +116,8 @@ func (m *Model) inSelectedGroup(h model.Host) bool {
 		return h.Favorite
 	case viewRecent:
 		return h.LastUsed > 0
+	case viewMarked:
+		return m.marked[h.Name]
 	case viewUngrouped:
 		return model.NormaliseGroup(h.Group) == ""
 	default:
@@ -121,30 +135,46 @@ func (m *Model) toggleGroup() {
 	m.rebuildGroups()
 }
 
-// sidebarWidth is how much room the group pane gets, or zero when the window is
-// too narrow to spare any. The host list matters more than the tree does.
-func (m *Model) sidebarWidth() int {
-	if m.hideGroups || m.width < 70 {
-		return 0
+// groupPaneLines draws the pane the design puts on the left: the tree at the
+// top, the fleet's health at the bottom, and whatever room is left between
+// them.
+func (m *Model) groupPaneLines(height, w, x, y int) []string {
+	// The health block is four lines and a rule, and it is only worth the room
+	// when the pane is tall enough that the tree does not lose by it.
+	healthH := 0
+	if height >= 14 {
+		healthH = 5
 	}
-	w := 22
-	for _, r := range m.groupRows {
-		if n := runewidth.StringWidth(r.label) + r.depth*2 + 8; n > w {
-			w = n
-		}
+	treeH := height - healthH - 2
+
+	out := []string{" " + m.heading("groups"), ""}
+	for _, row := range m.groupTreeLines(treeH, w, x, y+2) {
+		out = append(out, row)
 	}
-	return clamp(w, 18, m.width/3)
+	if healthH == 0 {
+		return out
+	}
+	for len(out) < height-healthH {
+		out = append(out, "")
+	}
+	out = append(out,
+		" "+m.hrule(w),
+		" "+m.heading("fleet health"),
+		"")
+	if bars := m.fleetBars(w); bars != "" {
+		out = append(out, " "+bars)
+	} else {
+		out = append(out, " "+m.st.faint.Render("press P to measure"))
+	}
+	out = append(out, " "+m.fleetLine())
+	return out
 }
 
-// renderSidebar draws the group pane, one string per row. Padding it to a
-// width or a height is not its job: joinPanes does that, because doing it by
-// hand is what put the two panes two columns out of step.
-func (m *Model) renderSidebar(height int) []string {
-	w := m.sidebarWidth()
-	if w == 0 {
+// groupTreeLines draws the tree itself, one string per row.
+func (m *Model) groupTreeLines(height, w, x, y int) []string {
+	if height < 1 {
 		return nil
 	}
-
 	out := make([]string, 0, height)
 	start := 0
 	if m.groupCursor >= height {
@@ -152,6 +182,21 @@ func (m *Model) renderSidebar(height int) []string {
 	}
 	for i := start; i < len(m.groupRows) && len(out) < height; i++ {
 		r := m.groupRows[i]
+		active := i == m.groupCursor
+
+		at := i
+		m.hitAt(x-1, y+len(out), w+1, func() (tea.Model, tea.Cmd) {
+			// Clicking a branch that is already selected opens or closes it,
+			// which is the only way a mouse can reach the tree's second level.
+			if m.groupCursor == at {
+				m.toggleGroup()
+			}
+			m.groupCursor = at
+			m.focus = focusGroups
+			m.cursor, m.offset = 0, 0
+			m.applyFilter()
+			return m, nil
+		})
 
 		marker := " "
 		if r.kids {
@@ -160,46 +205,23 @@ func (m *Model) renderSidebar(height int) []string {
 				marker = m.gl.opened
 			}
 		}
-		indent := strings.Repeat("  ", r.depth)
-		count := fmt.Sprintf("%d", r.count)
-
-		label := indent + marker + " " + r.label
-		room := w - runewidth.StringWidth(count) - 2
-		line := " " + pad(label, max(1, room)) + " " + count
-
-		switch {
-		case i == m.groupCursor && m.focus == focusGroups:
-			line = m.st.selected.Render(line)
-		case i == m.groupCursor:
-			line = m.st.marked.Render(line)
-		default:
-			line = m.st.row.Render(line)
+		dot := m.st.unmarked.Render(m.gl.dot)
+		if active {
+			dot = m.st.ok.Render(m.gl.dot)
 		}
-		out = append(out, line)
+
+		count := fmt.Sprintf("%d", r.count)
+		label := strings.Repeat("  ", r.depth) + marker + " " + r.label
+		room := max(1, w-runewidth.StringWidth(count)-4)
+
+		name, num := m.st.dim, m.st.faint
+		if active {
+			name, num = m.st.bright, m.st.ok
+		}
+		if active && m.focus == focusGroups {
+			name = m.st.bright.Underline(true)
+		}
+		out = append(out, " "+dot+" "+name.Render(pad(label, room))+" "+num.Render(count))
 	}
 	return out
-}
-
-// joinPanes puts the group pane beside the host list.
-//
-// The layout library does the padding, in both directions. Counting spaces by
-// hand is how the two panes ended up misaligned: a row with a group in it and a
-// row without were built by different code and came out different widths, so
-// every host below the last group sat two columns to the right.
-func (m *Model) joinPanes(side, rows []string, height int) string {
-	hosts := strings.Join(rows, "\n")
-	w := m.sidebarWidth()
-	if w == 0 || len(side) == 0 {
-		return hosts
-	}
-
-	pane := lipgloss.NewStyle().Width(w).Height(height).Render(strings.Join(side, "\n"))
-
-	bars := make([]string, height)
-	for i := range bars {
-		bars[i] = m.gl.vbar
-	}
-	bar := lipgloss.NewStyle().Foreground(colMuted).Render(strings.Join(bars, "\n"))
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, pane, bar, hosts)
 }

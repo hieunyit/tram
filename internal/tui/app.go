@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -61,6 +62,10 @@ const (
 	modeConfirm
 	modeHelp
 	modeBusy
+	// The two overlays. Both are drawn over the screen rather than instead of
+	// it, because both are about the row you were already looking at.
+	modePalette
+	modeMenu
 )
 
 // Model is the whole interface. It holds one inventory and reloads it whenever
@@ -87,6 +92,38 @@ type Model struct {
 	offset   int
 	marked   map[string]bool
 	detail   bool
+
+	// tab is which of the three tables is showing, and sortKey and sortDir the
+	// column it is ordered by. The keys tab lists identities rather than hosts,
+	// so it keeps its own rows.
+	tab      tab
+	sortKey  sortKey
+	sortDir  int
+	accounts []model.Account
+
+	// agent is what ssh-add said about the running agent, empty until it has
+	// been asked.
+	agent string
+
+	// The command palette and the context menu.
+	paletteQuery  string
+	paletteCursor int
+	menuItems     []command
+	menuCursor    int
+	menuX, menuY  int
+
+	// hits is what the last frame drew that can be clicked. It is rebuilt by
+	// every View, so a click can only ever land on something still on screen.
+	hits      []hit
+	lastClick clickAt
+	// doubleClick says whether the press being handled is the second of two in
+	// the same place, for the strips where that means something.
+	doubleClick bool
+
+	// measuring is how many hosts a sweep is still working through, or zero.
+	// The sweep runs off the main loop, so the interface stays usable while
+	// hundreds of connections are attempted.
+	measuring int
 
 	// The group pane on the left, and which of the two panes the keyboard is
 	// talking to.
@@ -122,8 +159,15 @@ type Model struct {
 }
 
 // Runner is the work the command layer does on the interface's behalf.
+//
+// Measure replaced a plain ping: the design shows latency, load and the
+// operating system in the table and the details, and one ssh round trip can
+// answer all three, so asking twice would be asking twice for nothing.
 type Runner interface {
-	Ping(hosts []model.Host) []Row
+	Measure(hosts []model.Host) []Measurement
+	// Agent reports what the ssh agent holds, in a few words, or says that
+	// there is not one.
+	Agent() string
 	Doctor(hosts []model.Host) []Row
 	Exec(hosts []model.Host, command string) []Row
 }
@@ -144,6 +188,10 @@ func New(inv *inventory.Inventory, r Runner, ascii bool) *Model {
 		width:      80,
 		height:     24,
 		openGroups: map[string]bool{},
+		// The details pane is part of the layout rather than something to go
+		// looking for; i takes it away when the window is wanted for the table.
+		detail:  true,
+		sortDir: 1,
 	}
 	m.reload()
 	return m
@@ -154,6 +202,7 @@ func (m *Model) Outcome() Outcome { return m.outcome }
 
 func (m *Model) reload() {
 	m.hosts = m.inv.Hosts()
+	m.accounts = m.inv.Store.AccountList()
 	m.rebuildGroups()
 	m.applyFilter()
 }
@@ -162,13 +211,34 @@ func (m *Model) applyFilter() {
 	q := strings.TrimSpace(m.searchQuery)
 	m.filtered = nil
 	for _, h := range m.hosts {
-		if m.inSelectedGroup(h) && h.Matches(q) {
+		if !h.Matches(q) {
+			continue
+		}
+		// The sessions tab is the hosts you have actually opened. The group
+		// tree still narrows it, so sessions inside one group is a question you
+		// can ask.
+		if m.tab == tabSessions && h.LastUsed == 0 {
+			continue
+		}
+		if m.inSelectedGroup(h) {
 			m.filtered = append(m.filtered, h)
 		}
 	}
-	if m.cursor >= len(m.filtered) {
-		m.cursor = max(0, len(m.filtered)-1)
+	if m.tab == tabSessions && m.sortKey == sortAlias {
+		// Opening the tab on an alphabetical list would bury what you did a
+		// minute ago somewhere in the middle of it.
+		sortByRecent(m.filtered)
+	} else {
+		m.sortRows()
 	}
+	if m.cursor >= m.rowCount() {
+		m.cursor = max(0, m.rowCount()-1)
+	}
+}
+
+// sortByRecent puts the most recently opened host first.
+func sortByRecent(hs []model.Host) {
+	sort.SliceStable(hs, func(i, j int) bool { return hs[i].LastUsed > hs[j].LastUsed })
 }
 
 // current returns the host under the cursor.
@@ -197,7 +267,7 @@ func (m *Model) selection() []model.Host {
 	return out
 }
 
-func (m *Model) Init() tea.Cmd { return textinput.Blink }
+func (m *Model) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.checkAgent()) }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -213,7 +283,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 		return m, nil
 
+	case agentMsg:
+		m.agent = string(msg)
+		return m, nil
+
+	case measuredMsg:
+		m.measuring = 0
+		m.reload()
+		m.status = fmt.Sprintf("measured %d host(s), %d answered", msg.count, msg.up)
+		return m, nil
+
 	case errMsg:
+		// A sweep that failed is a sweep that finished, or the bar goes on
+		// claiming it is still measuring for the rest of the run.
+		m.measuring = 0
 		m.problem = msg.Error()
 		return m, nil
 
@@ -224,8 +307,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 
+	case tea.MouseMsg:
+		return m.updateMouse(msg)
+
 	case tea.KeyMsg:
 		m.problem = ""
+		// ctrl+k opens the palette from anywhere the list is showing, which is
+		// what the design's ⌘K does.
+		if msg.String() == "ctrl+k" && m.screen == screenList && (m.mode == modeNormal || m.mode == modePalette) {
+			if m.mode == modePalette {
+				m.closeOverlay()
+				return m, nil
+			}
+			return m.openPalette()
+		}
 		switch m.mode {
 		case modeSearch:
 			return m.updateSearch(msg)
@@ -235,6 +330,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePicker(msg)
 		case modeConfirm:
 			return m.updateConfirm(msg)
+		case modePalette:
+			return m.updatePalette(msg)
+		case modeMenu:
+			return m.updateMenu(msg)
 		case modeHelp:
 			m.mode = modeNormal
 			return m, nil
@@ -280,13 +379,21 @@ func (m *Model) View() string {
 	if m.quit {
 		return ""
 	}
+	// The hit map belongs to the frame about to be drawn, so it starts empty
+	// and is filled in by whatever actually reaches the screen.
+	m.clearHits()
+
 	switch m.mode {
 	case modeHelp:
 		return m.viewHelp()
 	case modeForm:
-		return m.form.view(m.width, m.height)
+		return m.viewForm()
 	case modePicker:
-		return m.picker.view(m.width, m.height)
+		return m.viewPicker()
+	case modePalette:
+		return m.viewPalette(m.viewList())
+	case modeMenu:
+		return m.viewMenu(m.viewList())
 	}
 	if m.screen == screenResult {
 		return m.viewResult()
@@ -310,37 +417,6 @@ func results(title string, rows []Row) tea.Cmd {
 }
 
 // ---- shared chrome --------------------------------------------------------
-
-func (m *Model) listHeight() int {
-	h := m.height - 4 // title, header, status, help
-	if m.detail {
-		h -= 8
-	}
-	if h < 3 {
-		h = 3
-	}
-	return h
-}
-
-func (m *Model) statusLine() string {
-	if m.problem != "" {
-		return m.st.bad.Render(m.problem)
-	}
-	if m.status != "" {
-		return m.st.muted.Render(m.status)
-	}
-	parts := []string{fmt.Sprintf("%d/%d hosts", len(m.filtered), len(m.hosts))}
-	if len(m.marked) > 0 {
-		parts = append(parts, fmt.Sprintf("%d marked", len(m.marked)))
-	}
-	if m.searchQuery != "" {
-		parts = append(parts, "filter "+m.searchQuery)
-	}
-	if m.inv.Managed == nil {
-		parts = append(parts, "no managed file; run tram init")
-	}
-	return m.st.muted.Render(strings.Join(parts, "  "+m.gl.dot+"  "))
-}
 
 func (m *Model) quitWith(a Action, host string) (tea.Model, tea.Cmd) {
 	m.outcome = Outcome{Action: a, Host: host}

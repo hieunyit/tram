@@ -14,7 +14,17 @@ import (
 
 type nullRunner struct{}
 
-func (nullRunner) Ping(hosts []model.Host) []Row   { return nil }
+// Measure answers the way a small, healthy fleet would, so that the columns the
+// design fills in have something to show in the tests.
+func (nullRunner) Measure(hosts []model.Host) []Measurement {
+	out := make([]Measurement, len(hosts))
+	for i, h := range hosts {
+		out[i] = Measurement{Host: h.Name, Class: "OK", OK: true, Millis: int64(3 + i), OS: "Linux 6.1", Load: "0.10", Uptime: "3 days"}
+	}
+	return out
+}
+
+func (nullRunner) Agent() string                   { return "agent 2 keys" }
 func (nullRunner) Doctor(hosts []model.Host) []Row { return nil }
 func (nullRunner) Exec(hosts []model.Host, command string) []Row {
 	return []Row{{Host: hosts[0].Name, Status: "OK", OK: true, Summary: "exit 0", Body: command}}
@@ -100,7 +110,7 @@ func drain(m *Model, cmd tea.Cmd) {
 func TestListRendersAndNavigates(t *testing.T) {
 	m := newModel(t)
 	out := m.View()
-	for _, want := range []string{"tram", "bastion", "web1", "laptop", "NAME"} {
+	for _, want := range []string{"TRAM", "HOSTS", "bastion", "web1", "laptop", "ALIAS", "USER@HOST"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the list does not show %q:\n%s", want, out)
 		}
@@ -109,16 +119,26 @@ func TestListRendersAndNavigates(t *testing.T) {
 		t.Fatalf("%d hosts listed, want 3", got)
 	}
 
+	// The table is sorted by alias, as the design has it, so one step down is
+	// laptop rather than whatever the file happened to list second.
 	send(m, "down")
-	if h, _ := m.current(); h.Name != "bastion" {
-		t.Errorf("after one step down the cursor is on %q", h.Name)
+	if h, _ := m.current(); h.Name != "laptop" {
+		t.Errorf("after one step down the cursor is on %q, want laptop", h.Name)
 	}
-	send(m, "i") // detail pane
-	if !strings.Contains(m.View(), "prod/web") && !strings.Contains(m.View(), "b.example.com") {
-		t.Error("the detail pane does not show the host")
+
+	// The details pane is part of the layout rather than something to go
+	// looking for, so it is showing before any key is pressed. It needs a wide
+	// enough window to earn its room.
+	m.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	if !strings.Contains(m.View(), "CONNECTION") || !strings.Contains(m.View(), "192.168.1.5") {
+		t.Errorf("the details pane does not show the host:\n%s", m.View())
 	}
-	if !m.detail {
-		t.Error("i did not open the detail pane")
+	send(m, "i")
+	if m.detail {
+		t.Error("i did not put the details pane away")
+	}
+	if strings.Contains(m.View(), "CONNECTION") {
+		t.Error("the details pane is still drawn after i")
 	}
 }
 
@@ -145,15 +165,15 @@ func TestSearchFiltersAsYouType(t *testing.T) {
 // open a session itself, so enter must quit and name the host.
 func TestConnectLeavesTheInterface(t *testing.T) {
 	m := newModel(t)
-	send(m, "down")
+	send(m, "down", "down")
 	mm, cmd := m.Update(key("enter"))
 	if cmd == nil {
 		t.Fatal("enter produced no command; it must quit so ssh can have the terminal")
 	}
 	_ = mm
 	out := m.Outcome()
-	if out.Action != ActionConnect || out.Host != "bastion" {
-		t.Errorf("outcome = %+v, want a connect to bastion", out)
+	if out.Action != ActionConnect || out.Host != "web1" {
+		t.Errorf("outcome = %+v, want a connect to web1", out)
 	}
 }
 
@@ -165,8 +185,8 @@ func TestMarkingSelectsSeveralHosts(t *testing.T) {
 	if got := len(m.selection()); got != 2 {
 		t.Fatalf("%d hosts selected after two marks, want 2", got)
 	}
-	if !strings.Contains(m.View(), "2 marked") {
-		t.Error("the status line does not report the marks")
+	if !strings.Contains(m.View(), "marked 2") {
+		t.Errorf("the top bar does not report the marks:\n%s", m.View())
 	}
 }
 

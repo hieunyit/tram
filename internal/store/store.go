@@ -21,6 +21,7 @@ type Store struct {
 	Accounts accountsFile
 	History  historyFile
 	Snippets snippetsFile
+	Facts    factsFile
 	Options  Options
 }
 
@@ -66,6 +67,11 @@ type Options struct {
 	Timeout int `toml:"timeout"`
 	// ASCII forces the plain box-drawing and marker set for old consoles.
 	ASCII bool `toml:"ascii"`
+	// Mouse lets the interface take clicks, wheel and right-click menus. It is
+	// on by default. Turning it off gives the terminal its own selection and
+	// copying back, which is the trade a captured mouse makes. Most terminals
+	// let you select while it is captured by holding shift.
+	Mouse *bool `toml:"mouse"`
 	// ConfirmMulti asks before running a command on more than one host.
 	ConfirmMulti bool `toml:"confirm_multi"`
 	// ConnectTimeout bounds how long ssh waits for each hop of an interactive
@@ -82,8 +88,14 @@ type Options struct {
 
 // DefaultOptions are the settings a fresh install runs with.
 func DefaultOptions() Options {
-	return Options{Parallel: 5, Timeout: 10, ConfirmMulti: true, ReusePassphrase: true}
+	on := true
+	return Options{Parallel: 5, Timeout: 10, ConfirmMulti: true, ReusePassphrase: true, Mouse: &on}
 }
+
+// MouseOn reports whether the interface should take the mouse. The option is a
+// pointer so that a config file written before it existed, which has no line
+// for it at all, still means yes rather than no.
+func (o Options) MouseOn() bool { return o.Mouse == nil || *o.Mouse }
 
 // Load reads every state file. A missing or unreadable file is not an error:
 // tram degrades to defaults rather than refusing to start over its own cache.
@@ -95,6 +107,13 @@ func Load() *Store {
 	readJSON(path("accounts.json"), &s.Accounts)
 	readJSON(path("history.json"), &s.History)
 	readJSON(path("snippets.json"), &s.Snippets)
+	readJSON(path("facts.json"), &s.Facts)
+	if s.Facts.Hosts == nil {
+		s.Facts.Hosts = map[string]Fact{}
+	}
+	if s.Facts.Events == nil {
+		s.Facts.Events = map[string][]Event{}
+	}
 	if s.Accounts.Links == nil {
 		s.Accounts.Links = map[string]string{}
 	}
@@ -249,7 +268,10 @@ func (s *Store) Touch(host string) error {
 	s.mu.Lock()
 	s.History.LastUsed[strings.ToLower(host)] = time.Now().Unix()
 	s.mu.Unlock()
-	return writeJSON(path("history.json"), &s.History)
+	if err := writeJSON(path("history.json"), &s.History); err != nil {
+		return err
+	}
+	return s.RecordEvent(host, "session opened")
 }
 
 // LastUsed returns the Unix time a host was last connected to, or zero.

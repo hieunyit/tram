@@ -191,6 +191,8 @@ press `w` to write it.
 ├── accounts.json             identities, and which host is linked to which
 ├── snippets.json             saved commands
 ├── history.json              last connected, and pinned hosts
+├── facts.json                what the last measurements found: latency, load,
+│                             system, and the recent activity per host
 └── config.toml               tram's own options
 
 ```
@@ -198,16 +200,17 @@ press `w` to write it.
 Nothing above holds a secret. A key passphrase lives only for the run that
 typed it.
 
-Groups and descriptions are kept as comments inside the stanza, in tram's own
-spelling, and are also read from the comment run above the `Host` line and in
-the spelling used by sshfleet, the tool tram replaces. An existing
+Groups, descriptions and tags are kept as comments inside the stanza, in tram's
+own spelling, and the group and description are also read from the comment run
+above the `Host` line and in the spelling used by sshfleet, the tool tram
+replaces. An existing
 configuration therefore keeps its groups on the first run, and the next edit to
 a host migrates its markers to tram's spelling without leaving a second copy.
 
 Delete `~/.config/tram/` entirely and `tram ls` still lists every host and
-`tram web1` still connects. You lose Recent, Favorites, snippets and account
-links. Groups and descriptions survive, because they are kept in `ssh_config`
-as comments.
+`tram web1` still connects. You lose Recent, Favorites, snippets, account
+links and every measurement. Groups, descriptions and tags survive, because they
+are kept in `ssh_config` as comments.
 
 After `tram init`, hosts declared outside `config.d/tram.conf` are read-only:
 still listed, still connectable, still usable with `exec`, but writing to one
@@ -215,20 +218,74 @@ needs `--force`.
 
 ## The interface
 
-Two screens.
+Three screens, drawn as one console: a bar naming the program and the file, the
+panes, and a bar of keys with a status line.
 
-**List.** Two panes. On the left a group tree: All, then Favorites and Recent
-once there is anything in them, then the hierarchy with a count beside each
-level, and the hosts with no group at the bottom. On the right the hosts in
-whichever row is selected. `tab`, `left` and `right` move between the panes,
-`enter` opens a branch, and `g` hides the tree when the window is narrow. Below
-70 columns it hides itself.
+**Hosts.** The table in the middle, a group tree on the left, the details of
+whatever the cursor is on the right. The columns are the alias, the login and
+address, the port, the latency, when you last connected, and the tags. `s`
+changes which column the table is sorted by and `S` reverses it. The window
+decides how many columns there is room for: the latency goes first, then the
+port, then the tags, then the date, and the alias is the last to give ground.
+`tab` moves between the tree and the table, `g` puts the tree away and `i` puts
+the details away.
 
-`enter` connects, `W` opens a new window, `f` opens sftp, `space` marks hosts,
-`/` searches within the selected group, `a`/`e`/`c`/`d` add, edit, clone and
-delete, `E` edits everything marked, `A` links to an account or makes one,
-`p`/`D`/`x`/`r` run ping, doctor, a command and a snippet, `I` imports an
-inventory, `*` pins, `i` shows detail, `?` lists the keys.
+`enter` connects, `W` opens a new window, `f` opens sftp, `y` copies the ssh
+command, `space` marks hosts, `/` searches, `a`/`e`/`c`/`d` add, edit, clone and
+delete, `E` edits everything marked, `A` links to an account, `x` runs a
+command, `r` runs a snippet, `D` runs the doctor, `I` imports an inventory, `*`
+pins, `?` lists the keys.
+
+`ctrl+k` opens the command palette: every action in one list, by name, filtered
+as you type. Nothing in it is implemented twice. Each entry replays the key that
+already does the job, so a palette entry cannot drift away from the key it
+claims to be, and neither can the right-click menu.
+
+**The mouse** works, and the design is why: a row selects, the box at its left
+end marks, a column heading sorts by that column and sorts back when clicked
+again, a tab switches view, a group selects and a second click on the same group
+opens its branch, the wheel scrolls, a double click connects, and the right
+button opens a menu for the row under the pointer. The chips along the bottom
+and the buttons in the panes are clickable too, and each is labelled with the
+key that does the same thing.
+
+Capturing the mouse takes selection and copying away from the terminal, which is
+a real loss. Most terminals give it back while you hold shift. If you would
+rather not have it at all, put `mouse = false` in `config.toml`.
+
+**Sessions** is the same table over the hosts you have actually opened, most
+recent first. It is for getting back to what you were doing: the machine you
+were on this morning is at the top of it, rather than somewhere in three hundred
+alphabetical rows.
+
+**Keys** lists your identities rather than your machines: for each one, the
+login it uses, how it proves itself, which key file, and how many hosts are
+linked to it. It is where you go to answer "which key is this host using" and
+"what else uses it". `enter` or `e` edits one, `a` makes one, and renaming one
+moves every host linked to it.
+
+`1`, `2` and `3` switch between the three tabs, and so does clicking them.
+
+**Measuring.** Nothing in the latency column, the reachability chart or the
+RTT, LOAD and SYSTEM readings is a guess. `p` measures the selection and `P`
+measures everything shown: one ssh connection per host, which times the round
+trip and, in the same connection, runs `uname -sr` and `uptime`. A host that
+answers but has neither command, such as a switch, counts as reachable and
+leaves those fields empty. What comes back is written to `facts.json`, so the
+chart of the last thirty measurements and the fleet's health survive a restart
+and mean something on the second run. A host nobody has measured shows a dash,
+never a zero.
+
+The sweep runs off the main loop, so the interface stays usable while hundreds
+of connections are attempted, and the bar says how many are still going.
+
+The bar at the top also says what the ssh agent is holding. That reading is
+`ssh-add -l` and its exit status, asked once when the interface opens; the keys
+themselves are never shown, only how many there are.
+
+**Tags** are free labels kept beside the stanza as `#tram-tags:`. A group says
+where a host sits in a hierarchy and a host has one; tags say what a host is and
+it can have as many as it needs. A search starting with `#` matches both.
 
 The account, group and jump fields open a list rather than asking you to
 remember what exists, and the account list can make one: filling in a host and
@@ -240,9 +297,21 @@ opens the folder, the same as the import screen's.
 to whichever host is selected. An import preview uses the same screen, where
 `w` writes the hosts and `esc` throws the plan away.
 
-Pasting works in every box that takes typing: with the mouse, however your
-terminal does it, and with ctrl+v. Selecting and copying is the terminal's own,
-because tram never captures the mouse and so never takes selection away from it.
+The group tree carries three views above the hierarchy: **Favorites** for what
+you pinned, **Recent** for what you have opened, and **Marked** for what an
+action is about to be applied to. Marked appears as soon as there is one.
+
+Pasting works in every box that takes typing: with ctrl+v, and with the middle
+button or however else your terminal pastes. Selecting text is the terminal's
+own while the mouse is captured, which on most terminals means holding shift,
+and is unconditional with `mouse = false`.
+
+The colours are the SSHFleet Console design in `giaodien/`, hex for hex. On a
+terminal that cannot show sixteen million colours they are converted to the
+nearest it has, and `--ascii` swaps the box drawing and the sparkline blocks for
+characters a console from 1995 will print. tram does not paint the page
+background: it draws on the terminal's own, so a themed or transparent terminal
+keeps looking like itself.
 
 The interface draws tram's own data and nothing else. It never renders the
 contents of a session. `enter` exits the interface, gives the terminal to ssh,

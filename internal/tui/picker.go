@@ -104,15 +104,30 @@ func (m *Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (p *picker) view(width, height int) string {
-	var b strings.Builder
-	b.WriteString(p.st.title.Render(p.title) + "\n")
-	if p.filter != "" {
-		b.WriteString(p.st.muted.Render("  filter "+p.filter) + "\n")
-	}
-	b.WriteString("\n")
+// viewPicker draws a chooser in the same frame as the rest of the interface.
+func (m *Model) viewPicker() string {
+	p := m.picker
+	bodyH := m.bodyHeight()
+	w := m.width - 2
 
-	visibleRows := max(3, height-8)
+	head := m.heading(p.title)
+	if p.filter != "" {
+		head = m.spreadIn(w, head, m.st.ok.Render("/ ")+m.st.value.Render(p.filter))
+	}
+	lines := []string{" " + head, " " + m.hrule(w), ""}
+	lines = append(lines, p.lines(bodyH-3, w)...)
+
+	keys := [][2]string{{"enter", "choose"}, {"type", "filter"}, {"esc", "back"}}
+	status := p.help
+	if status == "" {
+		status = fmt.Sprintf("%d of %d", len(p.visible), len(p.items))
+	}
+	return m.shell(m.pane(lines, m.width, bodyH), keys, status)
+}
+
+// lines is the list of choices, one string per row.
+func (p *picker) lines(height, width int) []string {
+	visibleRows := max(3, height)
 	if p.cursor < p.offset {
 		p.offset = p.cursor
 	}
@@ -122,7 +137,7 @@ func (p *picker) view(width, height int) string {
 	end := min(p.offset+visibleRows, len(p.visible))
 
 	if len(p.visible) == 0 {
-		b.WriteString(p.st.muted.Render("  nothing matches") + "\n")
+		return []string{p.st.muted.Render("nothing matches")}
 	}
 
 	// Size the label column to what is actually in this list. A fixed width
@@ -135,6 +150,7 @@ func (p *picker) view(width, height int) string {
 	}
 	labelW = clamp(labelW, 12, max(20, width-32))
 
+	var out []string
 	for i := p.offset; i < end; i++ {
 		c := p.visible[i]
 		marker := "  "
@@ -152,14 +168,14 @@ func (p *picker) view(width, height int) string {
 		if c.create {
 			line = marker + p.st.ok.Render(label)
 		}
-		b.WriteString(line + "\n")
+		out = append(out, line)
 	}
-	help := "type to filter  enter choose  esc back"
-	if p.help != "" {
-		help = p.help
-	}
-	b.WriteString("\n" + p.st.help.Render("  "+help))
-	return b.String()
+	return out
+}
+
+// view is the picker as one string, which is what the tests read.
+func (p *picker) view(width, height int) string {
+	return strings.Join(p.lines(height, width), "\n")
 }
 
 // ---- the specific pickers -------------------------------------------------

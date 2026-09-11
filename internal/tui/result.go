@@ -91,7 +91,7 @@ func (m *Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) viewResult() string {
 	r := m.result
-	var b strings.Builder
+	bodyH := m.bodyHeight()
 
 	ok := 0
 	for _, row := range r.rows {
@@ -99,11 +99,12 @@ func (m *Model) viewResult() string {
 			ok++
 		}
 	}
-	b.WriteString(m.st.title.Render(r.title))
+	// The tally goes in the bar rather than the border: a title is a path
+	// often enough that a count let into the border would be the part that got
+	// cut off.
+	tally := fmt.Sprintf("%d of %d ok", ok, len(r.rows))
 	if p := m.pendingImport; p != nil {
-		b.WriteString(m.st.muted.Render("   "+strings.Join(importTally(p), ", ")) + "\n\n")
-	} else {
-		b.WriteString(m.st.muted.Render(fmt.Sprintf("   %d of %d ok", ok, len(r.rows))) + "\n\n")
+		tally = strings.Join(importTally(p), ", ")
 	}
 
 	// Render every line, then window onto the cursor, so an expanded block
@@ -136,7 +137,7 @@ func (m *Model) viewResult() string {
 		}
 	}
 
-	h := max(3, r.height)
+	h := max(3, bodyH-3)
 	// Keep the cursor's own header line on screen.
 	cursorLine := 0
 	for i, l := range lines {
@@ -152,20 +153,24 @@ func (m *Model) viewResult() string {
 		r.offset = cursorLine - h + 1
 	}
 	end := min(r.offset+h, len(lines))
+
+	body := make([]string, 0, h)
 	for i := r.offset; i < end; i++ {
-		b.WriteString(lines[i].text + "\n")
-	}
-	for i := end - r.offset; i < h; i++ {
-		b.WriteString("\n")
+		body = append(body, lines[i].text)
 	}
 
-	b.WriteString(m.statusLine() + "\n")
-	help := "space expand  o expand all  enter connect to this host  esc back"
+	keys := [][2]string{{"space", "expand"}, {"o", "expand all"}, {"enter", "connect to this host"}, {"esc", "back"}}
 	if p := m.pendingImport; p != nil {
-		help = fmt.Sprintf("space expand  o expand all  enter or w write %d host(s)  esc cancel", p.Writes())
+		keys = [][2]string{{"space", "expand"}, {"o", "expand all"},
+			{"enter or w", fmt.Sprintf("write %d host(s)", p.Writes())}, {"esc", "cancel"}}
 	}
-	b.WriteString(m.st.help.Render(help))
-	return b.String()
+
+	w := m.width - 2
+	out := []string{" " + m.spreadIn(w, m.heading(r.title), m.st.dim.Render(tally)), " " + m.hrule(w), ""}
+	for _, l := range body {
+		out = append(out, " "+l)
+	}
+	return m.shell(m.pane(out, m.width, bodyH), keys, tally)
 }
 
 // importTally summarises a pending import, naming only the outcomes that

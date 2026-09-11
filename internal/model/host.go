@@ -23,6 +23,11 @@ type Host struct {
 	Group string `json:"group"`
 	Desc  string `json:"desc"`
 
+	// Tags are free labels kept in a comment beside the stanza. A group says
+	// where a host sits in the hierarchy and a host has exactly one; tags say
+	// what it is, and a host can have as many as it needs.
+	Tags []string `json:"tags,omitempty"`
+
 	// Account is the identity this host is linked to, and Drift is set when the
 	// host's own User or IdentityFile no longer match what that account would
 	// write. A drifted host is never overwritten by apply.
@@ -100,16 +105,53 @@ func (h Host) Matches(q string) bool {
 	}
 	q = strings.ToLower(q)
 	if strings.HasPrefix(q, "#") {
-		return strings.Contains(strings.ToLower(h.Group), strings.TrimPrefix(q, "#"))
+		want := strings.TrimPrefix(q, "#")
+		if strings.Contains(strings.ToLower(h.Group), want) {
+			return true
+		}
+		// A # query asks about labels rather than names, and a tag is a label,
+		// so it answers for both rather than making the user remember which
+		// prefix belongs to which.
+		return h.HasTag(want)
 	}
 	fields := []string{h.Name, h.HostName, h.User, h.Group, h.Desc, h.Account, h.ProxyJump}
 	fields = append(fields, h.Aliases...)
+	fields = append(fields, h.Tags...)
 	for _, f := range fields {
 		if strings.Contains(strings.ToLower(f), q) {
 			return true
 		}
 	}
 	return false
+}
+
+// HasTag reports whether any tag contains q, compared case-insensitively.
+func (h Host) HasTag(q string) bool {
+	for _, t := range h.Tags {
+		if strings.Contains(strings.ToLower(t), q) {
+			return true
+		}
+	}
+	return false
+}
+
+// TagList renders the tags the way they are written in the file.
+func (h Host) TagList() string { return strings.Join(h.Tags, ", ") }
+
+// ParseTags splits a typed list into tags, dropping blanks and duplicates so
+// that "web,, web , api" is two tags rather than four.
+func ParseTags(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		t := strings.TrimSpace(part)
+		if t == "" || seen[strings.ToLower(t)] {
+			continue
+		}
+		seen[strings.ToLower(t)] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // PortNum returns the port as a number, defaulting to 22.
