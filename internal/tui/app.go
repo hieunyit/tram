@@ -190,6 +190,18 @@ type Runner interface {
 	// moves one file or folder in either direction.
 	Files(host model.Host) (FileSystem, error)
 	Copy(job remote.Copy) error
+
+	// Locked names the key file standing between tram and this host: one that
+	// is passphrase protected and whose passphrase this run has not been told.
+	// Empty means nothing is in the way.
+	//
+	// It exists because ssh asks for a passphrase on the terminal, and the
+	// terminal is what the interface is drawing on. Asked there, the question
+	// lands in the middle of the host list and the answer goes nowhere.
+	Locked(host model.Host) string
+	// Unlock checks a passphrase against the key and remembers it for the rest
+	// of this run.
+	Unlock(keyPath, passphrase string) error
 	Doctor(hosts []model.Host) []Row
 	Exec(hosts []model.Host, command string) []Row
 }

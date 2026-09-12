@@ -77,6 +77,26 @@ type filesRunner struct {
 	fs     *fakeFS
 	copies []remote.Copy
 	fail   error
+	// locked is the key standing in the way, and passphrase the one that opens
+	// it. Together they stand in for a key file nobody has to write.
+	locked     string
+	passphrase string
+	unlocked   bool
+}
+
+func (r *filesRunner) Locked(h model.Host) string {
+	if r.unlocked {
+		return ""
+	}
+	return r.locked
+}
+
+func (r *filesRunner) Unlock(keyPath, passphrase string) error {
+	if passphrase != r.passphrase {
+		return fmt.Errorf("that passphrase does not open %s", keyPath)
+	}
+	r.unlocked = true
+	return nil
 }
 
 func (r *filesRunner) Files(h model.Host) (FileSystem, error) {
@@ -358,5 +378,60 @@ func TestARootHasNoWayUp(t *testing.T) {
 	}
 	if got := withParent("/home", list, false); got[0].Name != ".." {
 		t.Errorf("a directory below the root has no way up: %v", got[0].Name)
+	}
+}
+
+// TestALockedKeyIsAskedAboutHere is the screenshot from a real session: ssh
+// asked for the passphrase on the terminal, which is the screen the interface
+// was drawing on, so the question landed across the host list three times over
+// and the answer went nowhere.
+func TestALockedKeyIsAskedAboutHere(t *testing.T) {
+	m := wide(t)
+	r := &filesRunner{fs: newFakeFS(), locked: "/home/hellc/.ssh/id_ed25519", passphrase: "correct horse"}
+	m.Runner = r
+
+	_, cmd := m.Update(key("f"))
+	drain(m, cmd)
+
+	if m.screen == screenFiles {
+		t.Fatal("the browser opened without the key being unlocked; ssh would have asked")
+	}
+	if m.mode != modeForm {
+		t.Fatalf("nothing asked for the passphrase; mode is %v", m.mode)
+	}
+	out := m.View()
+	if !strings.Contains(out, "id_ed25519") {
+		t.Errorf("the box does not say which key it is about:\n%s", out)
+	}
+
+	// What is typed is not on the screen.
+	m.form.fields[0].input.SetValue("correct horse")
+	if strings.Contains(m.View(), "correct horse") {
+		t.Error("the passphrase is drawn on the screen")
+	}
+
+	// A wrong one is refused and the box stays open, emptied.
+	m.form.fields[0].input.SetValue("wrong")
+	send(m, "ctrl+s")
+	if m.mode != modeForm {
+		t.Fatal("a wrong passphrase closed the box")
+	}
+	if m.form.problem == "" {
+		t.Error("a wrong passphrase was accepted in silence")
+	}
+	if m.form.fields[0].input.Value() != "" {
+		t.Error("the box kept the wrong answer in it")
+	}
+
+	// The right one unlocks the key and goes on to what was waiting.
+	m.form.fields[0].input.SetValue("correct horse")
+	_, cmd = m.Update(key("ctrl+s"))
+	drain(m, cmd)
+
+	if !r.unlocked {
+		t.Fatal("the key was never unlocked")
+	}
+	if m.screen != screenFiles {
+		t.Fatalf("the browser did not open after unlocking: %v", m.problem)
 	}
 }

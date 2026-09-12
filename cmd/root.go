@@ -60,6 +60,18 @@ func (a *App) Session() []string {
 	return a.sess.Env()
 }
 
+// Secrets returns this run's passphrase cache, creating it on first use.
+//
+// The interface needs it for one thing: to put a passphrase in before opening a
+// connection, so that ssh finds the answer waiting rather than stopping to ask
+// on a screen tram is drawing on.
+func (a *App) Secrets() *secret.Session {
+	if a.sess == nil {
+		a.Session()
+	}
+	return a.sess
+}
+
 // CloseSession forgets every passphrase typed during this run.
 func (a *App) CloseSession() {
 	a.sess.Close()

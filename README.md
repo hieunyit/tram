@@ -338,6 +338,14 @@ makes a folder, `r` renames, `d` deletes, `.` shows the hidden names and `esc`
 closes the connection and goes back. Every copy and every delete asks first, and
 says which side it is about to touch.
 
+A passphrase-protected key is asked about in tram's own box before the
+connection is opened, not by ssh afterwards. ssh asks on the terminal, and the
+terminal is the screen the interface is drawing on: asked there, the question
+lands across the host list and the answer goes nowhere. Typed here it is checked
+against the key itself, so a typo is caught at once rather than arriving later
+as an authentication failure, and it reaches ssh through the same helper a
+session uses. Put the key in your ssh agent and none of this happens at all.
+
 The listing comes from one shell held open on the host for as long as the
 browser is: `ls` read once per directory, down a connection that was made once.
 Transfers are `scp`, which speaks the same `ssh_config` and is already on every

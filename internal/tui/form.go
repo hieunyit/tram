@@ -22,6 +22,7 @@ const (
 	formAccount
 	formMkdir
 	formRename
+	formPassphrase
 )
 
 // fieldID names a form field so the code reads as something other than indexes.
@@ -41,6 +42,7 @@ const (
 	fPath    fieldID = "path"
 	fAuth    fieldID = "auth"
 	fPathTo  fieldID = "to"
+	fPass    fieldID = "passphrase"
 	fTags    fieldID = "tags"
 )
 
@@ -52,6 +54,8 @@ type field struct {
 	// pick opens a chooser instead of accepting free text, which is how
 	// account, group and jump avoid being typed wrong.
 	pick bool
+	// secret draws dots instead of the characters typed.
+	secret bool
 	// hidden fields are not drawn. Choosing an account hides user and key,
 	// because the account decides them and showing two sources of truth invites
 	// the question of which one wins.
@@ -76,6 +80,10 @@ type form struct {
 	// a new one. Without it, saving an edit reads as a name collision with
 	// itself.
 	replaces string
+	// keyPath and then belong to the passphrase form: the key being unlocked,
+	// and the thing that was waiting on it.
+	keyPath string
+	then    func() (tea.Model, tea.Cmd)
 }
 
 func newInput(value, placeholder string) textinput.Model {
@@ -84,6 +92,15 @@ func newInput(value, placeholder string) textinput.Model {
 	t.Placeholder = placeholder
 	t.Prompt = ""
 	t.CharLimit = 200
+	return t
+}
+
+// newSecretInput is the same box with the characters hidden, for the one thing
+// tram ever asks for that must not be on the screen.
+func newSecretInput() textinput.Model {
+	t := newInput("", "")
+	t.EchoMode = textinput.EchoPassword
+	t.EchoCharacter = '•'
 	return t
 }
 
@@ -158,6 +175,33 @@ func (m *Model) openExecForm() {
 		note:    "the command runs without a terminal; anything interactive belongs in a session",
 	}
 	f.fields = []*field{{id: fCommand, label: "command", input: newInput("", "uptime")}}
+	f.focus(0)
+	m.form = f
+	m.mode = modeForm
+}
+
+// openPassphraseForm asks for a key passphrase in tram's own box.
+//
+// ssh would ask for it on the terminal, which is the screen the interface is
+// drawing on: the question lands across the host list and the answer goes
+// nowhere. Asked here and verified against the key, it reaches ssh through the
+// helper instead, and ssh never stops to ask at all.
+func (m *Model) openPassphraseForm(h model.Host, keyPath string, then func() (tea.Model, tea.Cmd)) {
+	f := &form{
+		kind:   formPassphrase,
+		st:     m.st,
+		gl:     m.gl,
+		origin: h,
+		title:  "unlock the key",
+		note:   shortenPath(keyPath),
+		after:  nil,
+	}
+	f.fields = []*field{{
+		id: fPass, label: "passphrase", input: newSecretInput(), secret: true,
+		hint: "held for this run of tram only, and written nowhere",
+	}}
+	f.keyPath = keyPath
+	f.then = then
 	f.focus(0)
 	m.form = f
 	m.mode = modeForm
@@ -312,7 +356,9 @@ func (m *Model) viewForm() string {
 	w := m.width - 2
 
 	lines := []string{" " + m.heading(f.title), " " + m.hrule(w), ""}
-	lines = append(lines, f.lines(bodyH-3, w)...)
+	for _, l := range f.lines(bodyH-3, w-1) {
+		lines = append(lines, " "+l)
+	}
 
 	return m.shell(
 		m.pane(lines, m.width, bodyH),
@@ -375,6 +421,20 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 
 	case formMkdir, formRename:
 		return m.submitFileName()
+
+	case formPassphrase:
+		if err := m.Runner.Unlock(f.keyPath, f.fields[0].input.Value()); err != nil {
+			f.problem = err.Error()
+			f.fields[0].input.SetValue("")
+			return m, nil
+		}
+		then := f.then
+		m.mode = modeNormal
+		m.form = nil
+		if then != nil {
+			return then()
+		}
+		return m, note("unlocked " + shortenPath(f.keyPath))
 
 	case formExec:
 		cmdText := f.get(fCommand)

@@ -16,6 +16,7 @@ import (
 	"github.com/hieuny/tram/internal/probe"
 	"github.com/hieuny/tram/internal/remote"
 	"github.com/hieuny/tram/internal/runner"
+	"github.com/hieuny/tram/internal/secret"
 	"github.com/hieuny/tram/internal/tui"
 )
 
@@ -254,6 +255,54 @@ func (r *tuiRunner) Files(h model.Host) (tui.FileSystem, error) {
 		Env:     req.Env(),
 		Timeout: timeout,
 	})
+}
+
+// Locked names the key file standing between tram and a host.
+//
+// It looks along the whole route, because a jump station's key is as much in
+// the way as the destination's, and reports the first one whose passphrase this
+// run has not been told. A key already in the ssh agent is not in the way:
+// there is nothing for anyone to type.
+func (r *tuiRunner) Locked(h model.Host) string {
+	inv, err := r.app.Inventory()
+	if err != nil {
+		return ""
+	}
+	cache := r.app.Secrets()
+
+	hosts := []model.Host{h}
+	for _, hop := range inv.Chain(h.Name).Hops {
+		if station, ok := inv.Host(model.ParseJumpSpec(hop.Spec).Host); ok {
+			hosts = append(hosts, station)
+		}
+	}
+	for _, x := range hosts {
+		for _, k := range x.IdentityFiles {
+			info, err := secret.InspectKey(k)
+			if err != nil || !info.Encrypted {
+				continue
+			}
+			if cache != nil {
+				if _, have := cache.Get(k); have {
+					continue
+				}
+			}
+			return secret.ExpandKeyPath(k)
+		}
+	}
+	return ""
+}
+
+// Unlock checks a passphrase against the key and remembers it for this run.
+func (r *tuiRunner) Unlock(keyPath, passphrase string) error {
+	if err := secret.VerifyPassphrase(keyPath, passphrase); err != nil {
+		return err
+	}
+	cache := r.app.Secrets()
+	if cache == nil {
+		return fmt.Errorf("this run has no passphrase cache to put it in")
+	}
+	return cache.Put(keyPath, passphrase)
 }
 
 // Copy moves one file or folder between this machine and a host.

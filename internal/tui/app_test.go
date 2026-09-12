@@ -46,6 +46,9 @@ func (nullRunner) Files(h model.Host) (FileSystem, error) {
 
 func (nullRunner) Copy(job remote.Copy) error { return nil }
 
+func (nullRunner) Locked(h model.Host) string              { return "" }
+func (nullRunner) Unlock(keyPath, passphrase string) error { return nil }
+
 func (nullRunner) Open(hosts []model.Host, beside bool) (string, error) {
 	lastOpen = &opened{hosts: model.Names(hosts), beside: beside}
 	if beside {

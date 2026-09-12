@@ -144,6 +144,13 @@ func (m *Model) openFiles(h model.Host) (tea.Model, tea.Cmd) {
 	if m.Runner == nil {
 		return m, nil
 	}
+	// A locked key is asked about here, in tram's own box, because ssh would
+	// ask on the screen the interface is drawing on. The browser opens once the
+	// answer is in, and ssh is never left with a question.
+	if key := m.Runner.Locked(h); key != "" {
+		m.openPassphraseForm(h, key, func() (tea.Model, tea.Cmd) { return m.openFiles(h) })
+		return m, nil
+	}
 	runner := m.Runner
 	m.status = "opening files on " + h.Name
 	return m, func() tea.Msg {
