@@ -142,33 +142,33 @@ func routeLines(chain model.JumpChain, name string) []string {
 
 // askpassFor decides whether ssh should route its questions through tram.
 //
-// It does so for one reason: to reuse a key passphrase across the hosts that
-// share the key file, for as long as tram is running. Nothing is stored, so
-// there is nothing to arm the helper for on a host whose keys are not
-// passphrase protected, and those hosts are left to ssh entirely.
+// It is armed for one purpose and one only: to hand ssh a passphrase tram has
+// already been told, so that the second host sharing a key file does not ask
+// again. Armed without one, the helper has to ask on the console itself, and
+// that is a worse place to be asked than ssh's own prompt: the helper is a
+// child process borrowing the terminal in the middle of an authentication.
 //
-// The check before arming is not caution for its own sake. With the helper
-// forced, ssh does not fall back to asking on its own, so arming it where it
-// could not ask would fail the login with nothing on screen to explain why.
+// So the rule is the narrow one. A host with no encrypted key has nothing to
+// reuse. A host whose passphrase tram does not know is left to ssh entirely,
+// which is what tram did before it existed and works perfectly well.
 func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.AskpassSetup {
-	if !inv.Store.Options.ReusePassphrase {
-		return launcher.AskpassSetup{}
-	}
-	if !hasEncryptedKey(a, h) {
-		return launcher.AskpassSetup{}
-	}
+	// One question to ssh, not three: every one of these is about the same list
+	// of keys, and asking for it costs a process.
+	keys := effectiveKeys(a, h)
+	hasKey := firstEncrypted(keys) != ""
+	cached := firstLocked(a, keys) == ""
+
 	force, version := secret.SupportsAskpassRequire()
-	if !force {
+	if !force && hasKey {
 		fmt.Fprintf(os.Stderr,
 			"note: %s has no SSH_ASKPASS_REQUIRE, so ssh will ask for the passphrase itself each time\n",
 			version)
-		return launcher.AskpassSetup{}
 	}
-	// The helper asks on the console when it has no cached answer, so it needs
-	// somebody there to ask. Both checks matter: a console tram can open, and a
-	// run that a person is actually sitting at. Arming it in a script would
-	// block on a prompt nobody sees.
-	if !isTerminal(os.Stdin) || !secret.TTYAvailable() {
+	// The helper still needs a console for the one question it relays rather
+	// than answers: an unknown host key.
+	console := isTerminal(os.Stdin) && secret.TTYAvailable()
+
+	if !armAskpass(inv.Store.Options.ReusePassphrase, hasKey, cached, force, console) {
 		return launcher.AskpassSetup{}
 	}
 	return launcher.AskpassSetup{
@@ -179,35 +179,64 @@ func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.Askpass
 	}
 }
 
-// hasEncryptedKey reports whether any key this host would offer is passphrase
-// protected, which is the only case where reusing an answer helps.
-func hasEncryptedKey(a *App, h model.Host) bool {
-	return firstLockedKey(a, h) != ""
+// armAskpass is the whole rule, in one place, so that it can be read and tested
+// without a key, a machine or a terminal anywhere near it.
+//
+// cached is the one that matters and the one that was got wrong. The helper
+// exists to hand ssh an answer tram already has. With an answer, arming it
+// means nobody is asked twice. Without one, arming it means the helper has to
+// ask on the console itself, in the middle of an authentication, from a child
+// process borrowing the terminal: a worse place to be asked than ssh's own
+// prompt, which has always worked.
+func armAskpass(reuse, hasKey, cached, force, console bool) bool {
+	return reuse && hasKey && cached && force && console
 }
 
-// firstLockedKey names the first key ssh would offer for a host that exists, is
-// passphrase protected, and is not already in this run's cache.
+// firstEncrypted names the first key in a list that exists on this machine and
+// is passphrase protected, or nothing.
 //
 // Only the first: ssh tries them in order, and asking about every encrypted key
 // on the machine to open one host would be worse than the problem.
-func firstLockedKey(a *App, h model.Host) string {
-	keys := launcher.IdentityFiles(a.SSHConfigArg(), h.Name)
-	if len(keys) == 0 {
-		keys = h.IdentityFiles
-	}
+func firstEncrypted(keys []string) string {
 	for _, k := range keys {
-		info, err := secret.InspectKey(k)
-		if err != nil || !info.Exists || !info.Encrypted {
-			continue
+		if info, err := secret.InspectKey(k); err == nil && info.Exists && info.Encrypted {
+			return secret.ExpandKeyPath(k)
 		}
-		if cache := a.Secrets(); cache != nil {
-			if _, have := cache.Get(k); have {
-				return ""
-			}
-		}
-		return secret.ExpandKeyPath(k)
 	}
 	return ""
+}
+
+// firstLocked is that key again, unless this run already knows its passphrase,
+// in which case nothing stands in the way.
+//
+// The two questions look alike and are not. Folding them together was a real
+// bug: a host stopped counting as having an encrypted key the moment its
+// passphrase was cached, so the helper was disarmed exactly when it had
+// something to offer, and every host after the first asked again.
+func firstLocked(a *App, keys []string) string {
+	key := firstEncrypted(keys)
+	if key == "" {
+		return ""
+	}
+	if cache := a.Secrets(); cache != nil {
+		if _, have := cache.Get(key); have {
+			return ""
+		}
+	}
+	return key
+}
+
+// firstLockedKey answers the same question about a host, for the interface.
+func firstLockedKey(a *App, h model.Host) string { return firstLocked(a, effectiveKeys(a, h)) }
+
+// effectiveKeys is every key ssh would offer for a host, which is more than the
+// stanza names: a Host * block above it, or ssh's own defaults when nothing
+// names a key at all.
+func effectiveKeys(a *App, h model.Host) []string {
+	if keys := launcher.IdentityFiles(a.SSHConfigArg(), h.Name); len(keys) > 0 {
+		return keys
+	}
+	return h.IdentityFiles
 }
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }

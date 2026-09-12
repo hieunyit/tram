@@ -221,12 +221,13 @@ func SplitCommand(t Terminal, self, host string, override []string) (argv []stri
 // of chatter from wt.exe would land in the middle of the host list. It is still
 // read: a launcher that failed used to do so in silence, and the interface said
 // a tab had opened when none had.
-func OpenQuietly(argv []string) error {
+func OpenQuietly(argv []string, env []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("no window command")
 	}
 	var said bytes.Buffer
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = &said, &said
 
 	if err := cmd.Start(); err != nil {

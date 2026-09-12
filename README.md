@@ -344,7 +344,17 @@ still gets ssh's own defaults. tram asks `ssh -G` and reads the answer, which
 costs milliseconds and no connection.
 
 A passphrase-protected key is asked about in tram's own box before the
-connection is opened, not by ssh afterwards. ssh asks on the terminal, and the
+connection is opened, not by ssh afterwards. That is true of `enter` as much as
+of the browser: asked once, the answer covers every host sharing the key file,
+the browser, and the tabs opened with `W`. On the browser the box is the only
+way in, because the browser is the screen ssh would otherwise ask on. On `enter`
+escape goes ahead anyway and lets ssh ask in its own way, so a key format tram
+cannot read is never a locked door.
+
+The helper that hands ssh the answer is armed only when there is an answer to
+hand it. Armed without one it would have to ask on the console itself, from a
+child process borrowing the terminal in the middle of an authentication, which
+is a worse place to be asked than ssh's own prompt. ssh asks on the terminal, and the
 terminal is the screen the interface is drawing on: asked there, the question
 lands across the host list and the answer goes nowhere. Typed here it is checked
 against the key itself, so a typo is caught at once rather than arriving later

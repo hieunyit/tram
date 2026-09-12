@@ -80,10 +80,14 @@ type form struct {
 	// a new one. Without it, saving an edit reads as a name collision with
 	// itself.
 	replaces string
-	// keyPath and then belong to the passphrase form: the key being unlocked,
-	// and the thing that was waiting on it.
+	// keyPath, then and orElse belong to the passphrase form: the key being
+	// unlocked, the thing that was waiting on it, and what to do instead when
+	// the box is escaped. A box with no way past it could lock somebody out of
+	// their own machine over a key format tram cannot read, so where there is a
+	// way to go on without an answer, escape takes it.
 	keyPath string
 	then    func() (tea.Model, tea.Cmd)
+	orElse  func() (tea.Model, tea.Cmd)
 }
 
 func newInput(value, placeholder string) textinput.Model {
@@ -186,7 +190,7 @@ func (m *Model) openExecForm() {
 // drawing on: the question lands across the host list and the answer goes
 // nowhere. Asked here and verified against the key, it reaches ssh through the
 // helper instead, and ssh never stops to ask at all.
-func (m *Model) openPassphraseForm(h model.Host, keyPath string, then func() (tea.Model, tea.Cmd)) {
+func (m *Model) openPassphraseForm(h model.Host, keyPath string, then, orElse func() (tea.Model, tea.Cmd)) {
 	f := &form{
 		kind:   formPassphrase,
 		st:     m.st,
@@ -202,6 +206,10 @@ func (m *Model) openPassphraseForm(h model.Host, keyPath string, then func() (te
 	}}
 	f.keyPath = keyPath
 	f.then = then
+	f.orElse = orElse
+	if orElse != nil {
+		f.note += "   " + m.gl.dot + "   esc lets ssh ask instead"
+	}
 	f.focus(0)
 	m.form = f
 	m.mode = modeForm
@@ -315,8 +323,12 @@ func (m *Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.popForm() {
 			return m, nil
 		}
+		orElse := f.orElse
 		m.mode = modeNormal
 		m.form = nil
+		if orElse != nil {
+			return orElse()
+		}
 		return m, nil
 	case "tab", "down":
 		f.move(1)

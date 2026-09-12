@@ -80,7 +80,7 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.editAccount()
 		}
 		if h, ok := m.current(); ok {
-			return m.quitWith(ActionConnect, h.Name)
+			return m.connect(h)
 		}
 	case "shift+enter", "alt+enter", "W":
 		return m.openElsewhere(m.selection(), false)
@@ -240,6 +240,24 @@ func (m *Model) openCmd(hosts []model.Host, beside bool) tea.Cmd {
 		}
 		return reloadMsg(said)
 	}
+}
+
+// connect gives the terminal to ssh, asking first for a key passphrase tram
+// does not yet know.
+//
+// Asking here rather than leaving it to ssh is what makes one answer cover the
+// whole run: the hosts that share the key file, the file browser, and the tabs
+// opened from this list. Escape goes ahead anyway and lets ssh ask in its own
+// way, which is the path that has always worked.
+func (m *Model) connect(h model.Host) (tea.Model, tea.Cmd) {
+	open := func() (tea.Model, tea.Cmd) { return m.quitWith(ActionConnect, h.Name) }
+	if m.Runner != nil {
+		if key := m.Runner.Locked(h); key != "" {
+			m.openPassphraseForm(h, key, open, open)
+			return m, nil
+		}
+	}
+	return open()
 }
 
 // setTab switches the view and puts the cursor back at the top, because the row

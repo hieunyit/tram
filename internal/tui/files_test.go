@@ -435,3 +435,81 @@ func TestALockedKeyIsAskedAboutHere(t *testing.T) {
 		t.Fatalf("the browser did not open after unlocking: %v", m.problem)
 	}
 }
+
+// TestConnectingAsksForALockedKeyToo is what makes one answer cover the run.
+//
+// Left to ssh, a passphrase typed at its prompt is typed again for the next
+// host, for the file browser and for every tab. Asked here it is checked, kept
+// for the run, and handed to ssh by the helper from then on.
+func TestConnectingAsksForALockedKeyToo(t *testing.T) {
+	m := wide(t)
+	r := &filesRunner{fs: newFakeFS(), locked: "/home/hellc/.ssh/id_ed25519", passphrase: "correct horse"}
+	m.Runner = r
+
+	_, cmd := m.Update(key("enter"))
+	drain(m, cmd)
+	if m.quit {
+		t.Fatal("the interface gave up the terminal before the key was unlocked")
+	}
+	if m.mode != modeForm {
+		t.Fatalf("connecting asked nothing; mode is %v", m.mode)
+	}
+
+	m.form.fields[0].input.SetValue("correct horse")
+	send(m, "ctrl+s")
+	if !r.unlocked {
+		t.Fatal("the key was never unlocked")
+	}
+	if out := m.Outcome(); out.Action != ActionConnect || out.Host != "bastion" {
+		t.Errorf("outcome = %+v, want a connect to bastion", out)
+	}
+}
+
+// TestEscapeOnThePassphraseBoxStillConnects is the way out.
+//
+// tram cannot read every key format there is, and a box with no way past it
+// would lock somebody out of their own machine over one it cannot parse. Escape
+// goes ahead and lets ssh ask in its own way, which has always worked.
+func TestEscapeOnThePassphraseBoxStillConnects(t *testing.T) {
+	m := wide(t)
+	m.Runner = &filesRunner{fs: newFakeFS(), locked: "/home/hellc/.ssh/id_ed25519", passphrase: "x"}
+
+	_, cmd := m.Update(key("enter"))
+	drain(m, cmd)
+	if m.mode != modeForm {
+		t.Fatal("connecting asked nothing")
+	}
+	if !strings.Contains(m.View(), "esc lets ssh ask") {
+		t.Errorf("the box does not offer the way past:\n%s", m.View())
+	}
+
+	send(m, "esc")
+	if out := m.Outcome(); out.Action != ActionConnect || out.Host != "bastion" {
+		t.Errorf("escape gave %+v, want the connection to go ahead anyway", out)
+	}
+}
+
+// TestTheBrowserHasNoWayPast is the other half of that choice: the browser is
+// the screen ssh would ask on, so going ahead without an answer is going ahead
+// into the mess the box exists to prevent.
+func TestTheBrowserHasNoWayPast(t *testing.T) {
+	m := wide(t)
+	m.Runner = &filesRunner{fs: newFakeFS(), locked: "/home/hellc/.ssh/id_ed25519", passphrase: "x"}
+
+	_, cmd := m.Update(key("f"))
+	drain(m, cmd)
+	if m.mode != modeForm {
+		t.Fatal("the browser asked nothing")
+	}
+	if strings.Contains(m.View(), "esc lets ssh ask") {
+		t.Error("the browser offers a way past that leads into a prompt nobody can answer")
+	}
+
+	send(m, "esc")
+	if m.screen == screenFiles {
+		t.Error("escape opened the browser anyway")
+	}
+	if m.quit {
+		t.Error("escape gave up the terminal")
+	}
+}

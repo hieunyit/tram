@@ -148,7 +148,9 @@ func (m *Model) openFiles(h model.Host) (tea.Model, tea.Cmd) {
 	// ask on the screen the interface is drawing on. The browser opens once the
 	// answer is in, and ssh is never left with a question.
 	if key := m.Runner.Locked(h); key != "" {
-		m.openPassphraseForm(h, key, func() (tea.Model, tea.Cmd) { return m.openFiles(h) })
+		// No way past this one: the browser is the screen ssh would ask on, so
+		// going ahead without an answer is going ahead into the mess.
+		m.openPassphraseForm(h, key, func() (tea.Model, tea.Cmd) { return m.openFiles(h) }, nil)
 		return m, nil
 	}
 	runner := m.Runner

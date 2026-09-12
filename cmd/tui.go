@@ -188,6 +188,12 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 		t = launcher.DetectTerminal()
 	}
 	override := inv.Store.Options.WindowCommand
+	// The tab runs tram again, and a second tram would start with an empty
+	// cache and ask for the same passphrase. Handing it this run's cache is
+	// what makes one answer cover the whole run, tabs included.
+	env := launcher.Request{Askpass: launcher.AskpassSetup{
+		Enabled: true, Binary: launcher.SelfPath(), Session: r.app.Session(),
+	}}.Env()
 
 	if beside {
 		// A pane is about one host: there is no useful reading of "put six
@@ -197,7 +203,7 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := launcher.OpenQuietly(argv); err != nil {
+		if err := launcher.OpenQuietly(argv, env); err != nil {
 			return "", err
 		}
 		if !split {
@@ -211,7 +217,7 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := launcher.OpenQuietly(argv); err != nil {
+		if err := launcher.OpenQuietly(argv, env); err != nil {
 			return "", err
 		}
 	}
