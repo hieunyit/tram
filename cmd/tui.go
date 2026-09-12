@@ -260,16 +260,14 @@ func (r *tuiRunner) Files(h model.Host) (tui.FileSystem, error) {
 // Locked names the key file standing between tram and a host.
 //
 // It looks along the whole route, because a jump station's key is as much in
-// the way as the destination's, and reports the first one whose passphrase this
-// run has not been told. A key already in the ssh agent is not in the way:
-// there is nothing for anyone to type.
+// the way as the destination's, and asks ssh itself which keys each of them
+// would offer: the stanza is not the whole answer, and a key in a Host * block
+// or one of ssh's own defaults is just as real.
 func (r *tuiRunner) Locked(h model.Host) string {
 	inv, err := r.app.Inventory()
 	if err != nil {
 		return ""
 	}
-	cache := r.app.Secrets()
-
 	hosts := []model.Host{h}
 	for _, hop := range inv.Chain(h.Name).Hops {
 		if station, ok := inv.Host(model.ParseJumpSpec(hop.Spec).Host); ok {
@@ -277,17 +275,8 @@ func (r *tuiRunner) Locked(h model.Host) string {
 		}
 	}
 	for _, x := range hosts {
-		for _, k := range x.IdentityFiles {
-			info, err := secret.InspectKey(k)
-			if err != nil || !info.Encrypted {
-				continue
-			}
-			if cache != nil {
-				if _, have := cache.Get(k); have {
-					continue
-				}
-			}
-			return secret.ExpandKeyPath(k)
+		if key := firstLockedKey(r.app, x); key != "" {
+			return key
 		}
 	}
 	return ""

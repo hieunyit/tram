@@ -154,7 +154,7 @@ func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.Askpass
 	if !inv.Store.Options.ReusePassphrase {
 		return launcher.AskpassSetup{}
 	}
-	if !hasEncryptedKey(h) {
+	if !hasEncryptedKey(a, h) {
 		return launcher.AskpassSetup{}
 	}
 	force, version := secret.SupportsAskpassRequire()
@@ -181,13 +181,33 @@ func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.Askpass
 
 // hasEncryptedKey reports whether any key this host would offer is passphrase
 // protected, which is the only case where reusing an answer helps.
-func hasEncryptedKey(h model.Host) bool {
-	for _, k := range h.IdentityFiles {
-		if info, err := secret.InspectKey(k); err == nil && info.Encrypted {
-			return true
-		}
+func hasEncryptedKey(a *App, h model.Host) bool {
+	return firstLockedKey(a, h) != ""
+}
+
+// firstLockedKey names the first key ssh would offer for a host that exists, is
+// passphrase protected, and is not already in this run's cache.
+//
+// Only the first: ssh tries them in order, and asking about every encrypted key
+// on the machine to open one host would be worse than the problem.
+func firstLockedKey(a *App, h model.Host) string {
+	keys := launcher.IdentityFiles(a.SSHConfigArg(), h.Name)
+	if len(keys) == 0 {
+		keys = h.IdentityFiles
 	}
-	return false
+	for _, k := range keys {
+		info, err := secret.InspectKey(k)
+		if err != nil || !info.Exists || !info.Encrypted {
+			continue
+		}
+		if cache := a.Secrets(); cache != nil {
+			if _, have := cache.Get(k); have {
+				return ""
+			}
+		}
+		return secret.ExpandKeyPath(k)
+	}
+	return ""
 }
 
 func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }

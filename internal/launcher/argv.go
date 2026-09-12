@@ -5,6 +5,7 @@ package launcher
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -162,6 +163,41 @@ func SFTPArgv(host, configPath string) []string {
 		argv = append(argv, "-F", configPath)
 	}
 	return append(argv, host)
+}
+
+// IdentityFiles asks ssh which keys it would offer for a host.
+//
+// The stanza is not the whole answer, and reading it was the mistake. A key set
+// in a Host * block belongs to every host under it, and a host that names no
+// key at all still gets ssh's own defaults, ~/.ssh/id_ed25519 among them.
+// tram's parser sees neither, so a host with a passphrase-protected key looked
+// like a host with no key, and nothing was done about the passphrase until ssh
+// stopped to ask for it.
+//
+// ssh -G merges the whole configuration and answers in a few milliseconds
+// without opening anything.
+func IdentityFiles(configPath, host string) []string {
+	argv := []string{"-G"}
+	if configPath != "" {
+		argv = append(argv, "-F", configPath)
+	}
+	argv = append(argv, host)
+
+	out, err := exec.Command("ssh", argv...).Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "identityfile ")
+		if !ok {
+			continue
+		}
+		if p := strings.TrimSpace(rest); p != "" {
+			files = append(files, p)
+		}
+	}
+	return files
 }
 
 // SelfPath returns the path of the running tram binary, which ssh needs when

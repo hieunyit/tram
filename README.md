@@ -338,6 +338,11 @@ makes a folder, `r` renames, `d` deletes, `.` shows the hidden names and `esc`
 closes the connection and goes back. Every copy and every delete asks first, and
 says which side it is about to touch.
 
+Which key a host uses is a question for ssh, not for tram's parser. A key named
+in a `Host *` block belongs to every host under it, and a host that names none
+still gets ssh's own defaults. tram asks `ssh -G` and reads the answer, which
+costs milliseconds and no connection.
+
 A passphrase-protected key is asked about in tram's own box before the
 connection is opened, not by ssh afterwards. ssh asks on the terminal, and the
 terminal is the screen the interface is drawing on: asked there, the question
