@@ -189,7 +189,10 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "P":
 		return m.startMeasure(m.filtered)
 	case "D":
-		return m.runOn("doctor", func(hs []model.Host) []Row { return m.Runner.Doctor(hs) })
+		hosts := append([]model.Host(nil), m.selection()...)
+		return m.unlockThen("diagnosing", hosts, func() (tea.Model, tea.Cmd) {
+			return m.runOn("doctor", hosts, func(hs []model.Host) []Row { return m.Runner.Doctor(hs) })
+		})
 	case "x":
 		m.openExecForm()
 	case "r":
@@ -280,8 +283,11 @@ func (m *Model) startMeasure(hosts []model.Host) (tea.Model, tea.Cmd) {
 	if len(hosts) == 0 {
 		return m, nil
 	}
-	m.measuring = len(hosts)
-	return m, m.measure(append([]model.Host(nil), hosts...))
+	list := append([]model.Host(nil), hosts...)
+	return m.unlockThen("measuring", list, func() (tea.Model, tea.Cmd) {
+		m.measuring = len(list)
+		return m, m.measure(list)
+	})
 }
 
 func (m *Model) inv2reload() {
@@ -790,7 +796,7 @@ func (m *Model) healthStyle(h health) lipgloss.Style {
 	switch h {
 	case healthUp:
 		return m.st.ok
-	case healthSlow:
+	case healthSlow, healthLocked:
 		return m.st.warn
 	case healthDown:
 		return m.st.bad

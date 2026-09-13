@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/model"
@@ -39,6 +40,10 @@ type App struct {
 	// painted over before anyone could read it.
 	Note string
 
+	// mu guards the two lazily built fields below. The interface asks about many
+	// hosts at once, and the first of those questions is the one that builds
+	// them.
+	mu   sync.Mutex
 	inv  *inventory.Inventory
 	sess *secret.Session
 }
@@ -49,6 +54,13 @@ type App struct {
 // It is one run of tram, not one connection: that is what lets the second host
 // sharing a key file connect without asking. CloseSession ends it.
 func (a *App) Session() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.openSession().Env()
+}
+
+// openSession builds the cache if there is none. The caller holds mu.
+func (a *App) openSession() *secret.Session {
 	if a.sess == nil {
 		s, err := secret.OpenSession(store.Dir())
 		if err != nil {
@@ -57,7 +69,7 @@ func (a *App) Session() []string {
 		}
 		a.sess = s
 	}
-	return a.sess.Env()
+	return a.sess
 }
 
 // Secrets returns this run's passphrase cache, creating it on first use.
@@ -66,14 +78,15 @@ func (a *App) Session() []string {
 // connection, so that ssh finds the answer waiting rather than stopping to ask
 // on a screen tram is drawing on.
 func (a *App) Secrets() *secret.Session {
-	if a.sess == nil {
-		a.Session()
-	}
-	return a.sess
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.openSession()
 }
 
 // CloseSession forgets every passphrase typed during this run.
 func (a *App) CloseSession() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.sess.Close()
 	a.sess = nil
 }
@@ -82,6 +95,8 @@ var app = &App{}
 
 // Inventory loads the configuration tree once and reuses it.
 func (a *App) Inventory() (*inventory.Inventory, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if a.inv != nil {
 		return a.inv, nil
 	}
@@ -100,7 +115,11 @@ func (a *App) Inventory() (*inventory.Inventory, error) {
 }
 
 // Reload drops the cached tree, used after a write.
-func (a *App) Reload() { a.inv = nil }
+func (a *App) Reload() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.inv = nil
+}
 
 // EffectiveConfig is the ssh_config tram is actually reading, whether that came
 // from -F, from an environment variable, or from the default location.

@@ -457,9 +457,11 @@ func (m *Model) submitForm() (tea.Model, tea.Cmd) {
 		hosts := append([]model.Host(nil), f.targets...)
 		m.mode = modeNormal
 		m.form = nil
-		m.running = fmt.Sprintf("%s on %d host(s)", cmdText, len(hosts))
 		runner := m.Runner
-		return m, resultsFrom("exec: "+cmdText, func() []Row { return runner.Exec(hosts, cmdText) })
+		return m.unlockThen("running "+cmdText, hosts, func() (tea.Model, tea.Cmd) {
+			m.running = fmt.Sprintf("%s on %d host(s)", cmdText, len(hosts))
+			return m, resultsFrom("exec: "+cmdText, func() []Row { return runner.Exec(hosts, cmdText) })
+		})
 
 	case formBatch:
 		var applied int

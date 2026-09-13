@@ -165,8 +165,8 @@ func (r *tuiRunner) Measure(hosts []model.Host) []tui.Measurement {
 		if mm.OK {
 			mm.OS, mm.Uptime, mm.Load, mm.Disk, mm.RAM = parseFacts(x.Output)
 		} else {
-			mm.Detail = x.Detail
-			mm.Explain = x.Class.Explain()
+			class, detail := r.lockedClass(x.Host, x.Class, x.Detail)
+			mm.Class, mm.Detail, mm.Explain = string(class), detail, class.Explain()
 		}
 		out[i] = mm
 	}
@@ -286,6 +286,36 @@ func (r *tuiRunner) Locked(h model.Host) string {
 		}
 	}
 	return ""
+}
+
+// lockedClass names a failure LOCKED when a key nobody unlocked is what stood in
+// the way.
+//
+// ssh cannot say so itself: the helper refused, ssh moved on, and what it
+// reports is a rejected login or a jump station that went away. Only the
+// classes that failure produces are reconsidered, so a host that timed out
+// still says TIMEOUT whatever its key.
+func (r *tuiRunner) lockedClass(host string, c probe.Class, detail string) (probe.Class, string) {
+	if !lockCanExplain(c) {
+		return c, detail
+	}
+	inv, err := r.app.Inventory()
+	if err != nil {
+		return c, detail
+	}
+	h, ok := inv.Host(host)
+	if !ok {
+		return c, detail
+	}
+	if key := r.Locked(h); key != "" {
+		return probe.Locked, "key " + key + " is not unlocked; press p to unlock it"
+	}
+	return c, detail
+}
+
+// lockCanExplain is the set of failures a refused passphrase turns into.
+func lockCanExplain(c probe.Class) bool {
+	return c == probe.Auth || c == probe.Jump || c == probe.Unknown
 }
 
 // Unlock checks a passphrase against the key and remembers it for this run.
@@ -484,8 +514,12 @@ func (r *tuiRunner) Doctor(hosts []model.Host) []tui.Row {
 		summary := fmt.Sprintf("%d stage(s) ok", len(d.Stages))
 		status := "OK"
 		if !d.OK() {
-			status = string(d.Class)
+			class, detail := r.lockedClass(h.Name, d.Class, "")
+			status = string(class)
 			summary = "stopped at " + d.FailedAt
+			if class == probe.Locked {
+				summary = detail
+			}
 		}
 		rows = append(rows, tui.Row{Host: h.Name, Status: status, OK: d.OK(), Summary: summary, Body: body.String()})
 	}
@@ -510,13 +544,14 @@ func (r *tuiRunner) Exec(hosts []model.Host, command string) []tui.Row {
 		}
 		summary := "exit 0"
 		ok := x.Class.Good() && x.ExitCode == 0
+		class := x.Class
 		switch {
 		case !x.Class.Good():
-			summary = x.Detail
+			class, summary = r.lockedClass(x.Host, x.Class, x.Detail)
 		case x.ExitCode != 0:
 			summary = fmt.Sprintf("exit %d", x.ExitCode)
 		}
-		rows[i] = tui.Row{Host: x.Host, Status: string(x.Class), OK: ok, Summary: summary, Body: body}
+		rows[i] = tui.Row{Host: x.Host, Status: string(class), OK: ok, Summary: summary, Body: body}
 	}
 	return rows
 }

@@ -206,15 +206,13 @@ func importTally(p *inventory.ImportPlan) []string {
 
 // runOn performs an action across the current selection and switches to the
 // result screen when it finishes.
-func (m *Model) runOn(title string, fn func([]model.Host) []Row) (tea.Model, tea.Cmd) {
-	sel := m.selection()
-	if len(sel) == 0 {
+func (m *Model) runOn(title string, hosts []model.Host, fn func([]model.Host) []Row) (tea.Model, tea.Cmd) {
+	if len(hosts) == 0 {
 		return m, nil
 	}
-	// The selection is copied before it is handed over: the work runs on
-	// another goroutine, and sorting the table meanwhile rearranges the very
-	// slice it is walking.
-	hosts := append([]model.Host(nil), sel...)
+	// The caller hands over a copy of the selection: the work runs on another
+	// goroutine, and sorting the table meanwhile rearranges the very slice it is
+	// walking.
 	m.running = fmt.Sprintf("%s on %d host(s)", title, len(hosts))
 	return m, resultsFrom(fmt.Sprintf("%s: %d host(s)", title, len(hosts)), func() []Row { return fn(hosts) })
 }

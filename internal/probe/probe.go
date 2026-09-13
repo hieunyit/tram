@@ -40,6 +40,11 @@ const (
 	Jump Class = "JUMP"
 	// Config means ssh rejected the configuration before connecting.
 	Config Class = "CONFIG"
+	// Locked means a passphrase-protected key on the route had not been
+	// unlocked in this run, so a run nobody was sitting at could not use it.
+	// ssh alone reports this as AUTH or a failed jump, which reads as a broken
+	// host; the caller, which knows the keys, names it instead.
+	Locked Class = "LOCKED"
 	// Unknown means ssh failed in a way tram does not recognise, and the raw
 	// message is shown rather than flattened into a lie.
 	Unknown Class = "UNKNOWN"
@@ -67,6 +72,8 @@ func (c Class) Explain() string {
 		return "a jump station on the way failed"
 	case Config:
 		return "ssh rejected the configuration"
+	case Locked:
+		return "a key on the route is passphrase protected and was not unlocked in this run"
 	}
 	return "ssh failed in a way tram does not recognise"
 }

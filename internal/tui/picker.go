@@ -346,17 +346,21 @@ func (m *Model) openSnippetPicker() (tea.Model, tea.Cmd) {
 		if !ok {
 			return fail(fmt.Errorf("snippet %q vanished", v))
 		}
+		runner, hosts := m.Runner, append([]model.Host(nil), sel...)
+		run := func() tea.Cmd {
+			_, cmd := m.unlockThen("running "+sn.Name, hosts, func() (tea.Model, tea.Cmd) {
+				m.running = fmt.Sprintf("%s on %d host(s)", sn.Name, len(hosts))
+				return m, resultsFrom("snippet: "+sn.Name, func() []Row { return runner.Exec(hosts, sn.Command) })
+			})
+			return cmd
+		}
 		if sn.Confirm {
 			m.confirmText = fmt.Sprintf("%s is marked as needing confirmation. Run %q on %d host(s)?", sn.Name, sn.Command, len(sel))
-			runner, hosts := m.Runner, append([]model.Host(nil), sel...)
-			m.confirmFn = func() tea.Cmd {
-				m.running = fmt.Sprintf("%s on %d host(s)", sn.Name, len(hosts))
-				return resultsFrom("snippet: "+sn.Name, func() []Row { return runner.Exec(hosts, sn.Command) })
-			}
+			m.confirmFn = run
 			m.mode = modeConfirm
 			return nil
 		}
-		return results("snippet: "+sn.Name, m.Runner.Exec(sel, sn.Command))
+		return run()
 	})
 	return m, nil
 }

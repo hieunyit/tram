@@ -360,6 +360,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agent = string(msg)
 		return m, nil
 
+	case lockedMsg:
+		return m.askLocked(msg.plan, msg.keys, nil)
+
 	case measuredMsg:
 		// No note: the standing tally in the bar is the result of the sweep,
 		// and a note saying the same thing in different words would sit on top

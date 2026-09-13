@@ -95,12 +95,17 @@ const (
 	healthUp
 	healthSlow
 	healthDown
+	// healthLocked is a host nobody could reach because its key was never
+	// unlocked: nothing is known to be wrong with it, so it is not painted red.
+	healthLocked
 )
 
 func healthOf(f store.Fact) health {
 	switch {
 	case !f.Measured():
 		return healthUnknown
+	case f.Class == "LOCKED":
+		return healthLocked
 	case !f.Reachable():
 		return healthDown
 	case f.Slow():

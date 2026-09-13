@@ -301,7 +301,8 @@ func TestFleetCommandsRunOffTheMainLoop(t *testing.T) {
 	if m.screen == screenResult {
 		t.Error("the result screen opened before the work had run")
 	}
-	if m.running == "" {
+	// The first thing it waits on is the check for locked keys, then the work.
+	if m.running == "" && m.status == "" {
 		t.Error("the bar does not say what the interface is waiting for")
 	}
 	drain(m, cmd)

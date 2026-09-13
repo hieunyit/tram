@@ -140,9 +140,12 @@ a passphrase on top of the interface. The environment is the one thing that
 second ssh inherits, so these runs arm the helper in a cache-only mode: on the
 destination and on every station it serves a passphrase already given in this
 run and refuses everything else, never asking. A key nobody has unlocked yet
-simply fails with AUTH; open the host once, or unlock it in the box, and the
-next measurement goes through. On an ssh older than 8.4 the probe keeps
-BatchMode as before.
+would simply fail, so in the interface `p`, `P`, `D`, `x` and snippets first
+look along every selected route for keys this run has not unlocked, and ask
+for each one once in tram's own box, naming the hosts behind it, before the
+batch starts. Escape skips a key; its hosts come back LOCKED, painted as a
+warning rather than a failure, instead of an AUTH that reads as a broken host.
+On an ssh older than 8.4 the probe keeps BatchMode as before.
 
 Passwords are not tram's business. A host that authenticates with one is left
 to ssh, which asks exactly as it always did. Set `reuse_passphrase = false` in
