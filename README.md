@@ -132,6 +132,18 @@ tram arms it only when there is an encrypted key to ask about, an OpenSSH new
 enough for `SSH_ASKPASS_REQUIRE` (8.4), a console to ask on, and a person
 sitting at it. In a script it stays out of the way entirely.
 
+Runs nobody is sitting at, measuring with `p`, `tram doctor`, `tram exec`, are
+the other side of that rule. ssh reaches a `ProxyJump` station by starting a
+second ssh, and passes it the configuration file and `-v` but not
+`-o BatchMode`, so BatchMode alone left every station free to stop and ask for
+a passphrase on top of the interface. The environment is the one thing that
+second ssh inherits, so these runs arm the helper in a cache-only mode: on the
+destination and on every station it serves a passphrase already given in this
+run and refuses everything else, never asking. A key nobody has unlocked yet
+simply fails with AUTH; open the host once, or unlock it in the box, and the
+next measurement goes through. On an ssh older than 8.4 the probe keeps
+BatchMode as before.
+
 Passwords are not tram's business. A host that authenticates with one is left
 to ssh, which asks exactly as it always did. Set `reuse_passphrase = false` in
 `config.toml` to leave passphrases to ssh as well.

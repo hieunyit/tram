@@ -81,3 +81,24 @@ func TestEveryClassExplainsItself(t *testing.T) {
 		}
 	}
 }
+
+// TestBatchModeGivesWayToTheHelper pins down why the two cannot go together.
+// BatchMode stops ssh consulting the helper at all, so a passphrase already
+// given in this run could not be used; and it never reached the jump stations
+// anyway. With the helper armed, it is the helper that keeps the run silent.
+func TestBatchModeGivesWayToTheHelper(t *testing.T) {
+	has := func(args []string) bool {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "-o" && args[i+1] == "BatchMode=yes" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(Args("web", Options{})) {
+		t.Error("without a helper the probe must run in BatchMode")
+	}
+	if has(Args("web", Options{Helper: true})) {
+		t.Error("with a helper armed, BatchMode would stop ssh from using it")
+	}
+}

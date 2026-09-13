@@ -283,3 +283,51 @@ func TestAskpassInvocationIsRecognisedByShape(t *testing.T) {
 		}
 	}
 }
+
+// TestCacheOnlyRunsNeverReachForTheConsole covers measuring, diagnosing and
+// running a command across hosts: ssh runs nobody is sitting at, on the
+// destination and on every jump station on the way.
+//
+// Such a run is served what this run already knows and refused everything
+// else. A refusal is the right answer, not a failure: ssh moves on to the next
+// key or method. Asking would put a prompt on top of the interface.
+func TestCacheOnlyRunsNeverReachForTheConsole(t *testing.T) {
+	sess, err := OpenSession(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	for _, kv := range sess.Env() {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	t.Setenv(EnvCacheOnly, "1")
+
+	known := "Enter passphrase for key '/keys/known': "
+	key, ok := PassphrasePath(known)
+	if !ok {
+		t.Fatalf("not read as a passphrase prompt: %q", known)
+	}
+	if err := sess.Put(key, "given earlier"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if err := Askpass(known, &out); err != nil {
+		t.Fatalf("a cached passphrase was refused: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "given earlier" {
+		t.Errorf("served %q, want the cached passphrase", out.String())
+	}
+
+	for _, p := range []string{
+		"Enter passphrase for key '/keys/unknown': ",
+		"me@box's password: ",
+		"The authenticity of host 'x (1.2.3.4)' can't be established.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ",
+	} {
+		out.Reset()
+		if err := Askpass(p, &out); err == nil {
+			t.Errorf("answered %q with %q; an unattended run has nobody to ask", p, out.String())
+		}
+	}
+}

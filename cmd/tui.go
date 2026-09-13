@@ -127,7 +127,7 @@ func (r *tuiRunner) opts() (runner.Options, probe.Options) {
 		p, t = inv.Store.Options.Parallel, inv.Store.Options.Timeout
 	}
 	ro := runner.Options{Parallel: p, Timeout: time.Duration(t) * time.Second}
-	return ro, probe.Options{ConfigPath: r.app.SSHConfigArg(), Timeout: ro.Timeout}
+	return ro, unattended(r.app, probe.Options{ConfigPath: r.app.SSHConfigArg(), Timeout: ro.Timeout})
 }
 
 // factsCommand is what tram runs on the far end to fill in the details pane.
@@ -189,11 +189,11 @@ func (r *tuiRunner) Open(hosts []model.Host, beside bool) (string, error) {
 	}
 	override := inv.Store.Options.WindowCommand
 	// The tab runs tram again, and a second tram would start with an empty
-	// cache and ask for the same passphrase. Handing it this run's cache is
-	// what makes one answer cover the whole run, tabs included.
-	env := launcher.Request{Askpass: launcher.AskpassSetup{
-		Enabled: true, Binary: launcher.SelfPath(), Session: r.app.Session(),
-	}}.Env()
+	// cache and ask for the same passphrase. Handing it the two variables that
+	// name this run's cache, and nothing else, is what makes one answer cover
+	// the whole run, tabs included. The tab arms its own helper when it needs
+	// one.
+	env := append(os.Environ(), r.app.Session()...)
 
 	if beside {
 		// A pane is about one host: there is no useful reading of "put six

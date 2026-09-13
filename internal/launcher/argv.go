@@ -61,6 +61,9 @@ type AskpassSetup struct {
 	// values it carries are a file path and the key that opens it, both of
 	// which die with this process.
 	Session []string
+	// CacheOnly is for runs nobody is sitting at. The helper answers from the
+	// cache or refuses, and never asks on the console.
+	CacheOnly bool
 }
 
 // Argv builds the ssh command line for a request.
@@ -104,6 +107,9 @@ func (r Request) Env() []string {
 		// Without this ssh prefers to prompt on the terminal it already has,
 		// and the helper is never called. It needs OpenSSH 8.4 or newer.
 		env = setEnv(env, "SSH_ASKPASS_REQUIRE", "force")
+	}
+	if r.Askpass.CacheOnly {
+		env = setEnv(env, "TRAM_ASKPASS_CACHE_ONLY", "1")
 	}
 	// ssh on some platforms only consults SSH_ASKPASS when DISPLAY is set.
 	if r.Askpass.Force && getEnv(env, "DISPLAY") == "" {

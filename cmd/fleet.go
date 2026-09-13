@@ -110,7 +110,7 @@ password is reported as AUTH rather than blocking the run.`,
 				return err
 			}
 			opt := ff.options(app)
-			pOpt := probe.Options{ConfigPath: app.SSHConfigArg(), Timeout: opt.Timeout}
+			pOpt := unattended(app, probe.Options{ConfigPath: app.SSHConfigArg(), Timeout: opt.Timeout})
 
 			jobs := jobsWithAddr(hosts)
 			if !app.Format.Machine() && len(jobs) > 1 {
@@ -175,7 +175,7 @@ nothing, ProxyJump loops, and IdentityFile paths that are missing or too open.`,
 				return err
 			}
 			opt := ff.options(app)
-			pOpt := probe.Options{ConfigPath: app.SSHConfigArg(), Timeout: opt.Timeout}
+			pOpt := unattended(app, probe.Options{ConfigPath: app.SSHConfigArg(), Timeout: opt.Timeout})
 
 			var all []probe.Diagnosis
 			failed := 0
@@ -340,7 +340,7 @@ build script.`,
 
 func runExec(a *App, hosts []model.Host, command []string, ff fleetFlags) error {
 	opt := ff.options(a)
-	pOpt := probe.Options{ConfigPath: a.SSHConfigArg(), Timeout: opt.Timeout, Command: command}
+	pOpt := unattended(a, probe.Options{ConfigPath: a.SSHConfigArg(), Timeout: opt.Timeout, Command: command})
 
 	jobs := jobsWithAddr(hosts)
 	if ff.stream && !a.Format.Machine() {

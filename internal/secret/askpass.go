@@ -23,6 +23,17 @@ var (
 	passwordPrompt = regexp.MustCompile(`(?i)^(?:([^@\s]+)@)?([^@\s':]+)(?:'s)?\s+password`)
 )
 
+// EnvCacheOnly marks an ssh run nobody is sitting at: measuring, diagnosing,
+// running a command across hosts. The helper answers such a run from the cache
+// or refuses, and never reaches for the console.
+//
+// It matters because of jump stations. ssh starts a second ssh to reach a
+// ProxyJump host and hands it the configuration file and the verbosity, but not
+// -o BatchMode, so that second ssh would stop and ask for a passphrase on the
+// very terminal tram is drawing on. The environment is the one thing it does
+// inherit, which makes this the one place the rule can live.
+const EnvCacheOnly = "TRAM_ASKPASS_CACHE_ONLY"
+
 // IsAskpassInvocation reports whether this process was started by ssh asking a
 // question rather than by a user running a command.
 //
@@ -58,7 +69,16 @@ func LooksLikePrompt(s string) bool {
 // "yes" to an unknown fingerprint on the user's behalf would turn a warning
 // about a possible interception into a silent accept.
 func Askpass(prompt string, out io.Writer) error {
+	// Nobody is sitting at a run that set this, so the helper answers from the
+	// cache or not at all. Refusing is not a failure of the run: ssh treats it as
+	// no answer, skips that key or that method, and says AUTH in the end, which
+	// is the truth.
+	cacheOnly := os.Getenv(EnvCacheOnly) != ""
+
 	if hostKeyPrompt.MatchString(prompt) {
+		if cacheOnly {
+			return fmt.Errorf("an unattended run cannot answer a host key question")
+		}
 		return relayHostKeyQuestion(prompt, out)
 	}
 	sess := sessionFromEnv()
@@ -66,6 +86,9 @@ func Askpass(prompt string, out io.Writer) error {
 	if key, ok := PassphrasePath(prompt); ok {
 		if v, cached := sess.Get(key); cached {
 			return write(out, v)
+		}
+		if cacheOnly {
+			return fmt.Errorf("no passphrase for %s in this run, and nobody here to ask", key)
 		}
 		v, err := AskOnTTY(strings.TrimRight(prompt, " ") + " ")
 		if err != nil {
@@ -80,6 +103,10 @@ func Askpass(prompt string, out io.Writer) error {
 
 	if !strings.Contains(strings.ToLower(prompt), "password") {
 		return fmt.Errorf("unrecognised prompt: %s", prompt)
+	}
+	if cacheOnly {
+		// tram keeps no passwords, so there is never one to give here.
+		return fmt.Errorf("an unattended run cannot answer a password prompt")
 	}
 	// Asked, answered, forgotten.
 	v, err := AskOnTTY(strings.TrimRight(prompt, " ") + " ")

@@ -107,6 +107,19 @@ type Options struct {
 	Addr string
 	// Extra are additional ssh options.
 	Extra []string
+
+	// Env is the environment ssh runs with, and Helper says that it arms
+	// tram's askpass helper in the mode that answers from this run's cache or
+	// not at all.
+	//
+	// The two come as a pair because of jump stations. ssh reaches a ProxyJump
+	// host by starting a second ssh, and hands that one -F and -v but not -o
+	// BatchMode, so the second ssh would stop and ask for a key passphrase on
+	// the terminal. It does inherit the environment. With the helper forced,
+	// every question on every hop goes to tram and none to the terminal, and
+	// BatchMode is left off so that a passphrase tram does have can be given.
+	Env    []string
+	Helper bool
 }
 
 // classifiers map a substring of ssh's output to a class. Order matters: the
@@ -186,25 +199,7 @@ func HopOf(detail string, target ...string) string {
 // BatchMode is forced on so that ssh fails instead of stopping to ask for a
 // password. A probe that blocks on a prompt is not a probe.
 func Run(ctx context.Context, host string, opt Options) Result {
-	args := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new"}
-	if opt.ConfigPath != "" {
-		args = append([]string{"-F", opt.ConfigPath}, args...)
-	}
-	secs := int(opt.Timeout.Seconds())
-	if secs < 1 {
-		secs = 10
-	}
-	args = append(args, "-o", "ConnectTimeout="+itoa(secs))
-	if opt.Jump != "" {
-		args = append(args, "-J", opt.Jump)
-	}
-	args = append(args, opt.Extra...)
-	args = append(args, "-T", host)
-	if len(opt.Command) > 0 {
-		args = append(args, opt.Command...)
-	} else {
-		args = append(args, "true")
-	}
+	args := Args(host, opt)
 
 	// ssh's own ConnectTimeout covers the TCP connect and nothing else. Name
 	// resolution happens before it and can take seconds of its own, so tram's
@@ -216,6 +211,9 @@ func Run(ctx context.Context, host string, opt Options) Result {
 
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, "ssh", args...)
+	if opt.Env != nil {
+		cmd.Env = opt.Env
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -255,6 +253,38 @@ func Run(ctx context.Context, host string, opt Options) Result {
 		res.Class = Jump
 	}
 	return res
+}
+
+// Args builds the ssh command line for a probe.
+func Args(host string, opt Options) []string {
+	var args []string
+	if opt.ConfigPath != "" {
+		args = append(args, "-F", opt.ConfigPath)
+	}
+	// BatchMode keeps ssh from asking anything of the terminal, but only ssh
+	// itself: the second ssh a jump station needs never sees it. With the helper
+	// armed there is no need for it, and it would stop a cached passphrase from
+	// ever being handed over, because in batch mode ssh skips an encrypted key
+	// without asking anyone.
+	if !opt.Helper {
+		args = append(args, "-o", "BatchMode=yes")
+	}
+	args = append(args, "-o", "StrictHostKeyChecking=accept-new")
+
+	secs := int(opt.Timeout.Seconds())
+	if secs < 1 {
+		secs = 10
+	}
+	args = append(args, "-o", "ConnectTimeout="+itoa(secs))
+	if opt.Jump != "" {
+		args = append(args, "-J", opt.Jump)
+	}
+	args = append(args, opt.Extra...)
+	args = append(args, "-T", host)
+	if len(opt.Command) > 0 {
+		return append(args, opt.Command...)
+	}
+	return append(args, "true")
 }
 
 func itoa(n int) string {

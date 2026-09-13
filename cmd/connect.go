@@ -8,6 +8,7 @@ import (
 	"github.com/hieuny/tram/internal/inventory"
 	"github.com/hieuny/tram/internal/launcher"
 	"github.com/hieuny/tram/internal/model"
+	"github.com/hieuny/tram/internal/probe"
 	"github.com/hieuny/tram/internal/render"
 	"github.com/hieuny/tram/internal/secret"
 	"github.com/spf13/cobra"
@@ -177,6 +178,33 @@ func askpassFor(a *App, inv *inventory.Inventory, h model.Host) launcher.Askpass
 		Force:   true,
 		Session: a.Session(),
 	}
+}
+
+// unattended fills in the environment for an ssh run nobody is sitting at:
+// measuring, diagnosing, running a command across hosts.
+//
+// Every question such a run's ssh asks, on the destination and on every jump
+// station on the way, goes to tram's helper, which answers from this run's
+// cache or refuses. Nothing reaches the terminal. That is the fix for a jump
+// station stopping to ask for a passphrase on the screen the interface is
+// drawing on: ssh starts the station's ssh with -F and -v but without -o
+// BatchMode, and the environment is the one thing it does pass on.
+//
+// On an ssh too old to be told to use a helper, the probe keeps BatchMode as
+// before, which covers the destination and not the stations.
+func unattended(a *App, opt probe.Options) probe.Options {
+	if force, _ := secret.SupportsAskpassRequire(); !force {
+		return opt
+	}
+	opt.Env = launcher.Request{Askpass: launcher.AskpassSetup{
+		Enabled:   true,
+		Binary:    launcher.SelfPath(),
+		Force:     true,
+		CacheOnly: true,
+		Session:   a.Session(),
+	}}.Env()
+	opt.Helper = true
+	return opt
 }
 
 // armAskpass is the whole rule, in one place, so that it can be read and tested
